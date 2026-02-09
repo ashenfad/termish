@@ -2,7 +2,7 @@
 Filesystem commands for the terminal interpreter.
 """
 
-import os.path
+import posixpath
 from typing import TextIO
 
 from faketerm.errors import TerminalError
@@ -199,7 +199,7 @@ def cp(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
 
                 # Determine target path
                 if fs.isdir(dst):
-                    dirname = os.path.basename(src.rstrip("/"))
+                    dirname = posixpath.basename(src.rstrip("/"))
                     target_path = f"{dst.rstrip('/')}/{dirname}"
                 else:
                     target_path = dst
@@ -215,7 +215,7 @@ def cp(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
                 content = fs.read(src)
 
                 if fs.isdir(dst):
-                    filename = os.path.basename(src)
+                    filename = posixpath.basename(src)
                     target_path = f"{dst}/{filename}"
                 else:
                     target_path = dst

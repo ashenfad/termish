@@ -6,7 +6,7 @@ Supports tar, gzip, gunzip, zip, and unzip operations.
 
 import gzip as gzip_module
 import io
-import os
+import posixpath
 import tarfile
 import zipfile
 from typing import TextIO
@@ -174,8 +174,8 @@ def _add_to_tar(
 
         # Recursively add contents
         for name in fs.listdir(file_path):
-            child_path = os.path.join(file_path, name)
-            child_arcname = os.path.join(arcname, name)
+            child_path = posixpath.join(file_path, name)
+            child_arcname = posixpath.join(arcname, name)
             _add_to_tar(tf, child_path, child_arcname, verbose, stdout, fs)
     else:
         # Add file
@@ -219,17 +219,17 @@ def _tar_extract(
                     continue
 
                 # Skip macOS AppleDouble resource fork files (._*)
-                basename = os.path.basename(safe_name)
+                basename = posixpath.basename(safe_name)
                 if basename.startswith("._"):
                     continue
 
-                out_path = os.path.join(target_dir, safe_name)
+                out_path = posixpath.join(target_dir, safe_name)
 
                 if member.isdir():
                     fs.makedirs(out_path, exist_ok=True)
                 elif member.isfile():
                     # Ensure parent directory exists
-                    parent = os.path.dirname(out_path)
+                    parent = posixpath.dirname(out_path)
                     if parent:
                         fs.makedirs(parent, exist_ok=True)
 
@@ -318,8 +318,8 @@ def _add_to_zip(
 
         # Recursively add contents
         for name in fs.listdir(file_path):
-            child_path = os.path.join(file_path, name)
-            child_arcname = os.path.join(arcname, name)
+            child_path = posixpath.join(file_path, name)
+            child_arcname = posixpath.join(arcname, name)
             _add_to_zip(zf, child_path, child_arcname, recursive, fs)
     else:
         # Add file
@@ -393,17 +393,17 @@ def unzip(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> Non
                         continue
 
                     # Skip macOS AppleDouble resource fork files (._*)
-                    basename = os.path.basename(safe_name)
+                    basename = posixpath.basename(safe_name)
                     if basename.startswith("._"):
                         continue
 
-                    out_path = os.path.join(target_dir, safe_name)
+                    out_path = posixpath.join(target_dir, safe_name)
 
                     if info.is_dir():
                         fs.makedirs(out_path, exist_ok=True)
                     else:
                         # Ensure parent directory exists
-                        parent = os.path.dirname(out_path)
+                        parent = posixpath.dirname(out_path)
                         if parent:
                             fs.makedirs(parent, exist_ok=True)
 

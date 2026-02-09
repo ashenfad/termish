@@ -76,10 +76,10 @@ def unmask_and_unquote(text: str, mask_map: Dict[str, str]) -> str:
             quote_char = original[0]
             if quote_char == '"':
                 # Unescape \" -> "
-                inner = inner.replace('"', '"')
+                inner = inner.replace('\\"', '"')
             elif quote_char == "'":
                 # Unescape \' -> '
-                inner = inner.replace("'", "'")
+                inner = inner.replace("\\'", "'")
 
             text = text.replace(token, inner)
         else:
