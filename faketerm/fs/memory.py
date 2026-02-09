@@ -147,13 +147,13 @@ class MemoryFS:
             raise FileNotFoundError(_errno.ENOENT, "No such directory", path)
         if path == "/":
             raise OSError(_errno.EBUSY, "Cannot remove root directory")
-        # Check if directory is empty
+        # Check if directory has any direct children
         prefix = path.rstrip("/") + "/"
         for f in self._files:
             if f.startswith(prefix):
                 raise OSError(_errno.ENOTEMPTY, "Directory not empty", path)
         for d in self._dirs:
-            if d.startswith(prefix):
+            if d != path and d.startswith(prefix):
                 raise OSError(_errno.ENOTEMPTY, "Directory not empty", path)
         self._dirs.discard(path)
         self._timestamps.pop(path, None)
