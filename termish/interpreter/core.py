@@ -15,6 +15,7 @@ from .commands import archive, filesystem, meta, search, text
 from .commands import diff as diff_cmd
 from .commands import io as io_cmds
 from .commands import jq as jq_cmd
+from .commands import sed as sed_cmd
 
 # Static mapping of built-in commands
 BUILTINS: dict[str, CommandFunc] = {
@@ -41,6 +42,7 @@ BUILTINS: dict[str, CommandFunc] = {
     "sort": text.sort,
     "uniq": text.uniq,
     "cut": text.cut,
+    "sed": sed_cmd.sed,
     # Diff
     "diff": diff_cmd.diff,
     # Meta

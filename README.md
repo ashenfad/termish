@@ -7,7 +7,7 @@ Parses and executes shell scripts (pipelines, redirects, semicolons) against any
 ## Features
 
 - **Shell parser** -- pipes, redirects (`>`, `>>`, `<`), semicolons, quoted strings, line continuation
-- **25+ builtins** -- ls, cat, grep, find, sort, uniq, cut, wc, diff, tar, gzip, zip, jq, xargs, ...
+- **25+ builtins** -- ls, cat, grep, find, sed, sort, uniq, cut, wc, diff, tar, gzip, zip, jq, xargs, ...
 - **jq engine** -- built-in jq filter parser and evaluator (field access, pipes, functions, conditionals)
 - **Pluggable filesystem** -- `FileSystem` is a `typing.Protocol`; any object with the right methods works
 - **MemoryFS included** -- in-memory filesystem for testing and lightweight use
@@ -70,7 +70,7 @@ class FileSystem(Protocol):
 | Filesystem | `pwd`, `cd`, `mkdir`, `ls`, `touch`, `cp`, `mv`, `rm` |
 | I/O | `echo`, `cat`, `head`, `tail`, `tee` |
 | Search | `grep`, `find` |
-| Text | `wc`, `sort`, `uniq`, `cut` |
+| Text | `wc`, `sort`, `uniq`, `cut`, `sed` |
 | Diff | `diff` |
 | Archive | `tar`, `gzip`, `gunzip`, `zip`, `unzip` |
 | Meta | `xargs` |
