@@ -8,32 +8,63 @@ from typing import TYPE_CHECKING, TextIO
 from termish.errors import TerminalError
 from termish.fs import FileSystem
 
-from ._argparse import CommandArgParser
-
 if TYPE_CHECKING:
     from termish.errors import CommandFunc
 
 
+def _parse_xargs_args(
+    args: list[str],
+) -> tuple[str | None, int | None, bool, bool, str, list[str]]:
+    """Parse xargs options manually, stopping at the first non-option token.
+
+    Returns (replace, max_args, null, verbose, cmd_name, cmd_base_args).
+    """
+    replace: str | None = None
+    max_args: int | None = None
+    null = False
+    verbose = False
+
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        match arg:
+            case "-I" | "--replace":
+                i += 1
+                if i >= len(args):
+                    raise TerminalError("xargs: option -I requires an argument")
+                replace = args[i]
+            case s if s.startswith("-I") and len(s) > 2:
+                replace = s[2:]
+            case "-n" | "--max-args":
+                i += 1
+                if i >= len(args):
+                    raise TerminalError("xargs: option -n requires an argument")
+                try:
+                    max_args = int(args[i])
+                except ValueError:
+                    raise TerminalError(f"xargs: invalid number: {args[i]}")
+            case s if s.startswith("-n") and len(s) > 2 and s[2:].isdigit():
+                max_args = int(s[2:])
+            case "-0" | "--null":
+                null = True
+            case "-t" | "--verbose":
+                verbose = True
+            case s if s.startswith("-"):
+                raise TerminalError(f"xargs: unknown option: {s}")
+            case _:
+                # First non-option token is the command name; rest are its args
+                return replace, max_args, null, verbose, arg, args[i + 1 :]
+        i += 1
+
+    # No command specified — default to echo
+    return replace, max_args, null, verbose, "echo", []
+
+
 def xargs(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
     """Build and execute commands from standard input."""
-    parser = CommandArgParser(prog="xargs", add_help=False)
-    parser.add_argument("-I", "--replace", type=str, default=None)
-    parser.add_argument("-n", "--max-args", type=int, default=None)
-    parser.add_argument("-0", "--null", action="store_true")
-    parser.add_argument("-t", "--verbose", action="store_true")
-    parser.add_argument("command", nargs="*")
-
-    parsed, unknown = parser.parse_known_args(args)
-    if unknown:
-        raise TerminalError(f"xargs: unknown option: {unknown[0]}")
-
-    # Default command is echo
-    if not parsed.command:
-        cmd_name = "echo"
-        cmd_base_args: list[str] = []
-    else:
-        cmd_name = parsed.command[0]
-        cmd_base_args = parsed.command[1:]
+    replace, max_args, null, verbose, cmd_name, cmd_base_args = _parse_xargs_args(
+        args
+    )
 
     # Import BUILTINS here to avoid circular import
     from termish.interpreter.core import BUILTINS
@@ -48,7 +79,7 @@ def xargs(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> Non
     if not input_text.strip():
         return  # No input, no commands
 
-    if parsed.null:
+    if null:
         # Null-delimited
         items = [item for item in input_text.split("\0") if item]
     else:
@@ -60,7 +91,7 @@ def xargs(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> Non
 
     def execute_cmd(cmd_args: list[str]) -> None:
         """Execute command with given args and write output to stdout."""
-        if parsed.verbose:
+        if verbose:
             stdout.write(f"{cmd_name} {' '.join(cmd_args)}\n")
 
         cmd_stdin = io.StringIO()
@@ -68,15 +99,15 @@ def xargs(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> Non
         cmd_func(cmd_args, cmd_stdin, cmd_stdout, fs)
         stdout.write(cmd_stdout.getvalue())
 
-    if parsed.replace:
+    if replace:
         # -I mode: run command once per item, substituting placeholder
         for item in items:
-            cmd_args = [arg.replace(parsed.replace, item) for arg in cmd_base_args]
+            cmd_args = [arg.replace(replace, item) for arg in cmd_base_args]
             execute_cmd(cmd_args)
-    elif parsed.max_args:
+    elif max_args:
         # -n mode: batch items
-        for i in range(0, len(items), parsed.max_args):
-            batch = items[i : i + parsed.max_args]
+        for i in range(0, len(items), max_args):
+            batch = items[i : i + max_args]
             execute_cmd(cmd_base_args + batch)
     else:
         # Default: all items as arguments to single command
