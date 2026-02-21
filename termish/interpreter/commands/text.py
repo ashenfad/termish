@@ -374,17 +374,7 @@ def _expand_tr_set(s: str) -> str:
             if found:
                 continue
 
-        # Check for ranges like a-z
-        if i + 2 < len(s) and s[i + 1] == "-":
-            start_ord = ord(s[i])
-            end_ord = ord(s[i + 2])
-            if start_ord <= end_ord:
-                for c in range(start_ord, end_ord + 1):
-                    result.append(chr(c))
-                i += 3
-                continue
-
-        # Check for escape sequences
+        # Check for escape sequences (before ranges, so \-z isn't a range)
         if s[i] == "\\" and i + 1 < len(s):
             match s[i + 1]:
                 case "n":
@@ -397,6 +387,16 @@ def _expand_tr_set(s: str) -> str:
                     result.append(other)
             i += 2
             continue
+
+        # Check for ranges like a-z
+        if i + 2 < len(s) and s[i + 1] == "-":
+            start_ord = ord(s[i])
+            end_ord = ord(s[i + 2])
+            if start_ord <= end_ord:
+                for c in range(start_ord, end_ord + 1):
+                    result.append(chr(c))
+                i += 3
+                continue
 
         result.append(s[i])
         i += 1
