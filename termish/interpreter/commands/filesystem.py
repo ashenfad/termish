@@ -5,8 +5,8 @@ Filesystem commands for the terminal interpreter.
 import posixpath
 from typing import TextIO
 
-from faketerm.errors import TerminalError
-from faketerm.fs import FileSystem
+from termish.errors import TerminalError
+from termish.fs import FileSystem
 
 from ._argparse import CommandArgParser
 

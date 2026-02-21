@@ -5,13 +5,13 @@ Meta commands that invoke other commands.
 import io
 from typing import TYPE_CHECKING, TextIO
 
-from faketerm.errors import TerminalError
-from faketerm.fs import FileSystem
+from termish.errors import TerminalError
+from termish.fs import FileSystem
 
 from ._argparse import CommandArgParser
 
 if TYPE_CHECKING:
-    from faketerm.errors import CommandFunc
+    from termish.errors import CommandFunc
 
 
 def xargs(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
@@ -36,7 +36,7 @@ def xargs(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> Non
         cmd_base_args = parsed.command[1:]
 
     # Import BUILTINS here to avoid circular import
-    from faketerm.interpreter.core import BUILTINS
+    from termish.interpreter.core import BUILTINS
 
     if cmd_name not in BUILTINS:
         raise TerminalError(f"xargs: {cmd_name}: command not found")

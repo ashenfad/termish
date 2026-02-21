@@ -1,9 +1,9 @@
 import pytest
 
-from faketerm.errors import TerminalError
-from faketerm.fs import MemoryFS
-from faketerm.interpreter import execute_script
-from faketerm.parser import to_script
+from termish.errors import TerminalError
+from termish.fs import MemoryFS
+from termish.interpreter import execute_script
+from termish.parser import to_script
 
 
 @pytest.fixture

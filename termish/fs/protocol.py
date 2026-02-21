@@ -1,7 +1,7 @@
-"""FileSystem protocol and data types for faketerm.
+"""FileSystem protocol and data types for termish.
 
 Defines the structural interface that any filesystem must satisfy
-to work with faketerm's terminal commands.
+to work with termish's terminal commands.
 """
 
 from dataclasses import dataclass
@@ -50,7 +50,7 @@ class FileInfo:
 class FileSystem(Protocol):
     """Structural interface for filesystems used by terminal commands.
 
-    Any object implementing these methods can be passed to faketerm's
+    Any object implementing these methods can be passed to termish's
     interpreter. No inheritance required — uses structural (duck) typing.
     """
 

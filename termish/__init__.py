@@ -1,4 +1,4 @@
-"""faketerm: Virtual terminal with shell-like commands over a pluggable filesystem."""
+"""termish: Virtual terminal with shell-like commands over a pluggable filesystem."""
 
 from .ast import Command, Pipeline, Redirect, Script
 from .errors import TerminalError

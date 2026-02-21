@@ -9,10 +9,10 @@ import zipfile
 
 import pytest
 
-from faketerm import to_script
-from faketerm.errors import TerminalError
-from faketerm.fs import MemoryFS
-from faketerm.interpreter.core import execute_script
+from termish import to_script
+from termish.errors import TerminalError
+from termish.fs import MemoryFS
+from termish.interpreter.core import execute_script
 
 
 @pytest.fixture

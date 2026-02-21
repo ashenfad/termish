@@ -1,4 +1,4 @@
-"""jq-like JSON processor for faketerm."""
+"""jq-like JSON processor for termish."""
 
 from .eval import JqError, JqTypeError, evaluate
 from .parser import ParseError, parse_filter
