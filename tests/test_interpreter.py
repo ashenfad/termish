@@ -198,3 +198,188 @@ def test_diff_unknown_option(fs):
     with pytest.raises(TerminalError) as excinfo:
         execute_script(to_script("diff --unknown a.txt b.txt"), fs)
     assert "unknown option" in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
+# echo -n / -e
+# ---------------------------------------------------------------------------
+
+
+class TestEchoFlags:
+    def test_echo_n(self, fs):
+        out = execute_script(to_script("echo -n hello"), fs)
+        assert out == "hello"
+
+    def test_echo_e_newline(self, fs):
+        out = execute_script(to_script("echo -e 'hello\\nworld'"), fs)
+        assert out == "hello\nworld\n"
+
+    def test_echo_e_tab(self, fs):
+        out = execute_script(to_script("echo -e 'a\\tb'"), fs)
+        assert out == "a\tb\n"
+
+    def test_echo_ne_combined(self, fs):
+        out = execute_script(to_script("echo -ne 'hello\\n'"), fs)
+        assert out == "hello\n"
+
+    def test_echo_unknown_flag_is_literal(self, fs):
+        out = execute_script(to_script("echo -z test"), fs)
+        assert out == "-z test\n"
+
+
+# ---------------------------------------------------------------------------
+# head -N / tail -N / tail +N
+# ---------------------------------------------------------------------------
+
+
+class TestHeadTailShorthand:
+    def test_head_shorthand(self, fs):
+        fs.write("/f.txt", b"a\nb\nc\nd\ne\n")
+        out = execute_script(to_script("head -3 f.txt"), fs)
+        assert out == "a\nb\nc\n"
+
+    def test_tail_shorthand(self, fs):
+        fs.write("/f.txt", b"a\nb\nc\nd\ne\n")
+        out = execute_script(to_script("tail -2 f.txt"), fs)
+        assert out == "d\ne\n"
+
+    def test_tail_from_line(self, fs):
+        fs.write("/f.txt", b"a\nb\nc\nd\ne\n")
+        out = execute_script(to_script("tail -n +3 f.txt"), fs)
+        assert out == "c\nd\ne\n"
+
+
+# ---------------------------------------------------------------------------
+# grep -c / -w / -o / --include / --exclude
+# ---------------------------------------------------------------------------
+
+
+class TestGrepFlags:
+    def test_grep_count(self, fs):
+        fs.write("/f.txt", b"apple\nbanana\napricot\n")
+        out = execute_script(to_script("grep -c '^a' f.txt"), fs)
+        assert out.strip() == "2"
+
+    def test_grep_word(self, fs):
+        fs.write("/f.txt", b"cat\ncatalog\nthe cat sat\n")
+        out = execute_script(to_script("grep -w 'cat' f.txt"), fs)
+        assert "cat\n" in out
+        assert "the cat sat\n" in out
+        assert "catalog" not in out
+
+    def test_grep_only_matching(self, fs):
+        fs.write("/f.txt", b"abc 123 def 456\n")
+        out = execute_script(to_script("grep -o '[0-9]+' f.txt"), fs)
+        assert "123\n" in out
+        assert "456\n" in out
+
+    def test_grep_include(self, fs):
+        fs.mkdir("/src")
+        fs.write("/src/a.py", b"TODO: fix\n")
+        fs.write("/src/a.txt", b"TODO: fix\n")
+        out = execute_script(
+            to_script("grep -r --include '*.py' TODO /src"), fs
+        )
+        assert "a.py" in out
+        assert "a.txt" not in out
+
+    def test_grep_exclude(self, fs):
+        fs.mkdir("/src")
+        fs.write("/src/a.py", b"TODO: fix\n")
+        fs.write("/src/a.txt", b"TODO: fix\n")
+        out = execute_script(
+            to_script("grep -r --exclude '*.txt' TODO /src"), fs
+        )
+        assert "a.py" in out
+        assert "a.txt" not in out
+
+
+# ---------------------------------------------------------------------------
+# find -maxdepth / -mindepth
+# ---------------------------------------------------------------------------
+
+
+class TestFindDepth:
+    def test_find_maxdepth(self, fs):
+        fs.makedirs("/a/b/c")
+        fs.write("/a/x.txt", b"")
+        fs.write("/a/b/y.txt", b"")
+        fs.write("/a/b/c/z.txt", b"")
+        out = execute_script(to_script("find /a -maxdepth 1 -type f"), fs)
+        assert "x.txt" in out
+        assert "y.txt" not in out
+
+    def test_find_mindepth(self, fs):
+        fs.makedirs("/a/b")
+        fs.write("/a/x.txt", b"")
+        fs.write("/a/b/y.txt", b"")
+        out = execute_script(to_script("find /a -mindepth 2 -type f"), fs)
+        assert "y.txt" in out
+        assert "x.txt" not in out
+
+
+# ---------------------------------------------------------------------------
+# ls -h / -t
+# ---------------------------------------------------------------------------
+
+
+class TestLsFlags:
+    def test_ls_human_readable(self, fs):
+        fs.write("/big.txt", b"x" * 2048)
+        out = execute_script(to_script("ls -lh /big.txt"), fs)
+        assert "2.0K" in out
+
+    def test_ls_sort_by_time(self, fs):
+        fs.write("/a.txt", b"a")
+        fs.write("/b.txt", b"b")
+        # b.txt written second, should appear first with -t
+        out = execute_script(to_script("ls -lt /"), fs)
+        lines = [l for l in out.strip().split("\n") if l]
+        # b.txt should come before a.txt
+        b_idx = next(i for i, l in enumerate(lines) if "b.txt" in l)
+        a_idx = next(i for i, l in enumerate(lines) if "a.txt" in l)
+        assert b_idx < a_idx
+
+
+# ---------------------------------------------------------------------------
+# diff -i
+# ---------------------------------------------------------------------------
+
+
+class TestDiffIgnoreCase:
+    def test_diff_ignore_case(self, fs):
+        fs.write("/a.txt", b"Hello World\n")
+        fs.write("/b.txt", b"hello world\n")
+        # Without -i, should show differences
+        out_diff = execute_script(to_script("diff a.txt b.txt"), fs)
+        assert len(out_diff) > 0
+        # With -i, should show no differences
+        out_same = execute_script(to_script("diff -i a.txt b.txt"), fs)
+        assert out_same == ""
+
+
+# ---------------------------------------------------------------------------
+# basename / dirname
+# ---------------------------------------------------------------------------
+
+
+class TestBasenameDirname:
+    def test_basename_basic(self, fs):
+        out = execute_script(to_script("echo /usr/local/bin/python | xargs basename"), fs)
+        assert out.strip() == "python"
+
+    def test_basename_suffix(self, fs):
+        out = execute_script(to_script("basename /path/to/file.txt .txt"), fs)
+        assert out.strip() == "file"
+
+    def test_dirname_basic(self, fs):
+        out = execute_script(to_script("dirname /usr/local/bin/python"), fs)
+        assert out.strip() == "/usr/local/bin"
+
+    def test_dirname_no_slash(self, fs):
+        out = execute_script(to_script("dirname file.txt"), fs)
+        assert out.strip() == "."
+
+    def test_dirname_root(self, fs):
+        out = execute_script(to_script("dirname /file.txt"), fs)
+        assert out.strip() == "/"

@@ -7,7 +7,7 @@ Parses and executes shell scripts (pipelines, redirects, semicolons) against any
 ## Features
 
 - **Shell parser** -- pipes, redirects (`>`, `>>`, `<`), semicolons, quoted strings, line continuation
-- **25+ builtins** -- ls, cat, grep, find, sed, sort, uniq, cut, wc, diff, tar, gzip, zip, jq, xargs, ...
+- **30 builtins** -- ls, cat, grep, find, sed, tr, sort, uniq, cut, wc, diff, tar, gzip, zip, jq, xargs, basename, dirname, ...
 - **jq engine** -- built-in jq filter parser and evaluator (field access, pipes, functions, conditionals)
 - **Pluggable filesystem** -- `FileSystem` is a `typing.Protocol`; any object with the right methods works
 - **MemoryFS included** -- in-memory filesystem for testing and lightweight use
@@ -67,10 +67,10 @@ class FileSystem(Protocol):
 
 | Category | Commands |
 |----------|----------|
-| Filesystem | `pwd`, `cd`, `mkdir`, `ls`, `touch`, `cp`, `mv`, `rm` |
+| Filesystem | `pwd`, `cd`, `mkdir`, `ls`, `touch`, `cp`, `mv`, `rm`, `basename`, `dirname` |
 | I/O | `echo`, `cat`, `head`, `tail`, `tee` |
 | Search | `grep`, `find` |
-| Text | `wc`, `sort`, `uniq`, `cut`, `sed` |
+| Text | `wc`, `sort`, `uniq`, `cut`, `sed`, `tr` |
 | Diff | `diff` |
 | Archive | `tar`, `gzip`, `gunzip`, `zip`, `unzip` |
 | Meta | `xargs` |

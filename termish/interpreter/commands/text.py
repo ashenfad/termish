@@ -90,7 +90,7 @@ def sort(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
     parser.add_argument("-n", "--numeric-sort", action="store_true")
     parser.add_argument("-u", "--unique", action="store_true")
     parser.add_argument("-f", "--ignore-case", action="store_true")
-    parser.add_argument("-k", "--key", type=str, default=None)
+    parser.add_argument("-k", "--key", action="append", dest="keys", default=None)
     parser.add_argument("-t", "--field-separator", type=str, default=None)
     parser.add_argument("files", nargs="*")
 
@@ -113,36 +113,45 @@ def sort(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
             except IsADirectoryError:
                 raise TerminalError(f"sort: {path}: Is a directory")
 
-    # Parse -k field number (1-indexed)
-    field_num = None
-    if parsed.key:
-        try:
-            field_num = int(parsed.key.split(",")[0].split(".")[0])
-        except ValueError:
-            raise TerminalError(f"sort: invalid field specification: {parsed.key}")
+    # Parse -k field numbers (1-indexed), supports multiple -k flags
+    field_nums: list[int] = []
+    if parsed.keys:
+        for key_spec in parsed.keys:
+            try:
+                field_nums.append(int(key_spec.split(",")[0].split(".")[0]))
+            except ValueError:
+                raise TerminalError(f"sort: invalid field specification: {key_spec}")
 
     def make_key(line: str):
-        val = line
-        if field_num is not None:
-            if parsed.field_separator:
-                fields = line.split(parsed.field_separator)
-            else:
-                fields = line.split()
-            if field_num <= len(fields):
-                val = fields[field_num - 1]
-            else:
-                val = ""
+        if not field_nums:
+            val = line
+            if parsed.ignore_case:
+                val = val.lower()
+            if parsed.numeric_sort:
+                try:
+                    return (0, float(val))
+                except ValueError:
+                    return (1, val)
+            return val
 
-        if parsed.ignore_case:
-            val = val.lower()
+        if parsed.field_separator:
+            fields = line.split(parsed.field_separator)
+        else:
+            fields = line.split()
 
-        if parsed.numeric_sort:
-            try:
-                return (0, float(val))
-            except ValueError:
-                # Non-numeric sorts after numeric in GNU sort
-                return (1, val)
-        return val
+        key_parts: list = []
+        for fn in field_nums:
+            val = fields[fn - 1] if fn <= len(fields) else ""
+            if parsed.ignore_case:
+                val = val.lower()
+            if parsed.numeric_sort:
+                try:
+                    key_parts.append((0, float(val)))
+                except ValueError:
+                    key_parts.append((1, val))
+            else:
+                key_parts.append(val)
+        return tuple(key_parts)
 
     # Sort with stable sort
     sorted_lines = sorted(lines, key=make_key, reverse=parsed.reverse)
@@ -331,3 +340,140 @@ def cut(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
             chars = list(line)
             selected = select_items(chars, ranges, parsed.complement)
             stdout.write("".join(selected) + "\n")
+
+
+# ---------------------------------------------------------------------------
+# tr
+# ---------------------------------------------------------------------------
+
+
+def _expand_tr_set(s: str) -> str:
+    """Expand character set notation for tr (ranges and character classes)."""
+    classes = {
+        "[:upper:]": "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+        "[:lower:]": "abcdefghijklmnopqrstuvwxyz",
+        "[:digit:]": "0123456789",
+        "[:alpha:]": "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+        "[:alnum:]": "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789",
+        "[:space:]": " \t\n\r\f\v",
+        "[:blank:]": " \t",
+    }
+
+    result: list[str] = []
+    i = 0
+    while i < len(s):
+        # Check for character classes
+        if s[i] == "[" and i + 1 < len(s) and s[i + 1] == ":":
+            found = False
+            for cls_name, cls_chars in classes.items():
+                if s[i:].startswith(cls_name):
+                    result.append(cls_chars)
+                    i += len(cls_name)
+                    found = True
+                    break
+            if found:
+                continue
+
+        # Check for ranges like a-z
+        if i + 2 < len(s) and s[i + 1] == "-":
+            start_ord = ord(s[i])
+            end_ord = ord(s[i + 2])
+            if start_ord <= end_ord:
+                for c in range(start_ord, end_ord + 1):
+                    result.append(chr(c))
+                i += 3
+                continue
+
+        # Check for escape sequences
+        if s[i] == "\\" and i + 1 < len(s):
+            match s[i + 1]:
+                case "n":
+                    result.append("\n")
+                case "t":
+                    result.append("\t")
+                case "\\":
+                    result.append("\\")
+                case other:
+                    result.append(other)
+            i += 2
+            continue
+
+        result.append(s[i])
+        i += 1
+
+    return "".join(result)
+
+
+def tr(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
+    """Translate or delete characters."""
+    delete = False
+    squeeze = False
+    complement = False
+
+    # Manual flag parsing
+    text_args: list[str] = []
+    for arg in args:
+        if arg.startswith("-") and len(arg) > 1 and not text_args:
+            for ch in arg[1:]:
+                match ch:
+                    case "d":
+                        delete = True
+                    case "s":
+                        squeeze = True
+                    case "c" | "C":
+                        complement = True
+                    case _:
+                        raise TerminalError(f"tr: unknown option: -{ch}")
+        else:
+            text_args.append(arg)
+
+    if not text_args:
+        raise TerminalError("tr: missing operand")
+
+    set1 = _expand_tr_set(text_args[0])
+    set2 = _expand_tr_set(text_args[1]) if len(text_args) > 1 else ""
+
+    content = stdin.read()
+
+    if complement:
+        all_chars = sorted(set(content))
+        set1_chars = set(set1)
+        set1 = "".join(c for c in all_chars if c not in set1_chars)
+
+    if delete:
+        chars_to_delete = set(set1)
+        result = "".join(c for c in content if c not in chars_to_delete)
+        if squeeze and set2:
+            squeezed: list[str] = []
+            squeeze_set = set(set2)
+            for ch in result:
+                if ch in squeeze_set and squeezed and squeezed[-1] == ch:
+                    continue
+                squeezed.append(ch)
+            result = "".join(squeezed)
+    elif squeeze and not set2:
+        squeezed = []
+        squeeze_set = set(set1)
+        for ch in content:
+            if ch in squeeze_set and squeezed and squeezed[-1] == ch:
+                continue
+            squeezed.append(ch)
+        result = "".join(squeezed)
+    else:
+        if not set2:
+            raise TerminalError("tr: missing operand after SET1")
+        # Pad set2 to match set1 length (repeat last char)
+        if len(set2) < len(set1):
+            set2 = set2 + set2[-1] * (len(set1) - len(set2))
+        table = str.maketrans(set1, set2[: len(set1)])
+        result = content.translate(table)
+        if squeeze:
+            squeezed = []
+            squeeze_set = set(set2)
+            for ch in result:
+                if ch in squeeze_set and squeezed and squeezed[-1] == ch:
+                    continue
+                squeezed.append(ch)
+            result = "".join(squeezed)
+
+    stdout.write(result)

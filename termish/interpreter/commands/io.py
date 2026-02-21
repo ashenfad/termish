@@ -12,7 +12,52 @@ from ._argparse import CommandArgParser
 
 def echo(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
     """Echo arguments to stdout."""
-    stdout.write(" ".join(args) + "\n")
+    # Manual flag parsing: echo treats unknown flags as literal text
+    newline = True
+    interpret_escapes = False
+    text_start = 0
+    for i, arg in enumerate(args):
+        match arg:
+            case "-n":
+                newline = False
+                text_start = i + 1
+            case "-e":
+                interpret_escapes = True
+                text_start = i + 1
+            case "-ne" | "-en":
+                newline = False
+                interpret_escapes = True
+                text_start = i + 1
+            case _:
+                break
+
+    text = " ".join(args[text_start:])
+
+    if interpret_escapes:
+        result: list[str] = []
+        j = 0
+        while j < len(text):
+            if text[j] == "\\" and j + 1 < len(text):
+                match text[j + 1]:
+                    case "n":
+                        result.append("\n")
+                    case "t":
+                        result.append("\t")
+                    case "\\":
+                        result.append("\\")
+                    case "a":
+                        result.append("\a")
+                    case "b":
+                        result.append("\b")
+                    case other:
+                        result.append("\\" + other)
+                j += 2
+            else:
+                result.append(text[j])
+                j += 1
+        text = "".join(result)
+
+    stdout.write(text + ("\n" if newline else ""))
 
 
 def cat(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
@@ -108,11 +153,20 @@ def cat(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
 
 def head(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
     """Output the first part of files."""
+    # Pre-process: rewrite -N shorthand to -n N
+    processed_args = list(args)
+    if (
+        processed_args
+        and processed_args[0].startswith("-")
+        and processed_args[0][1:].isdigit()
+    ):
+        processed_args = ["-n", processed_args[0][1:]] + processed_args[1:]
+
     parser = CommandArgParser(prog="head", add_help=False)
     parser.add_argument("-n", "--lines", type=int, default=10)
     parser.add_argument("files", nargs="*")
 
-    parsed, unknown = parser.parse_known_args(args)
+    parsed, unknown = parser.parse_known_args(processed_args)
     if unknown:
         raise TerminalError(f"head: unknown option: {unknown[0]}")
 
@@ -147,19 +201,44 @@ def head(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
 
 def tail(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
     """Output the last part of files."""
+    # Pre-process: rewrite -N shorthand to -n N
+    processed_args = list(args)
+    if (
+        processed_args
+        and processed_args[0].startswith("-")
+        and processed_args[0][1:].isdigit()
+    ):
+        processed_args = ["-n", processed_args[0][1:]] + processed_args[1:]
+
     parser = CommandArgParser(prog="tail", add_help=False)
-    parser.add_argument("-n", "--lines", type=int, default=10)
+    parser.add_argument("-n", "--lines", type=str, default="10")
     parser.add_argument("files", nargs="*")
 
-    parsed, unknown = parser.parse_known_args(args)
+    parsed, unknown = parser.parse_known_args(processed_args)
     if unknown:
         raise TerminalError(f"tail: unknown option: {unknown[0]}")
 
-    limit = parsed.lines
+    # Parse limit: "+N" means from line N onwards, plain N means last N lines
+    # Handle case where parser splits "+3" into "+" and "3"
+    limit_str = parsed.lines
+    if limit_str == "+" and parsed.files and parsed.files[0].isdigit():
+        limit_str = "+" + parsed.files.pop(0)
+
+    from_start = False
+    if limit_str.startswith("+"):
+        from_start = True
+        limit = int(limit_str[1:])
+    else:
+        limit = int(limit_str)
+
+    def select_lines(all_lines: list[str]) -> list[str]:
+        if from_start:
+            return all_lines[limit - 1 :]
+        return all_lines[-limit:]
 
     if not parsed.files:
         lines = stdin.readlines()
-        for line in lines[-limit:]:
+        for line in select_lines(lines):
             stdout.write(line)
         return
 
@@ -171,7 +250,7 @@ def tail(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
             content_bytes = fs.read(path)
             content = content_bytes.decode("utf-8", errors="replace")
             lines = content.splitlines(keepends=True)
-            for line in lines[-limit:]:
+            for line in select_lines(lines):
                 stdout.write(line)
 
         except Exception as e:

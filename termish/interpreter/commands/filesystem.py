@@ -65,12 +65,26 @@ def mkdir(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> Non
             raise TerminalError(f"mkdir: cannot create directory '{path}': {e}")
 
 
+def _human_readable_size(size: int) -> str:
+    """Format size in human-readable units."""
+    fsize = float(size)
+    for unit in ("B", "K", "M", "G", "T"):
+        if abs(fsize) < 1024:
+            if unit == "B":
+                return f"{int(fsize)}{unit}"
+            return f"{fsize:.1f}{unit}"
+        fsize /= 1024
+    return f"{fsize:.1f}P"
+
+
 def ls(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
     """List directory contents."""
     parser = CommandArgParser(prog="ls", add_help=False)
     parser.add_argument("-l", action="store_true")
     parser.add_argument("-a", action="store_true")
     parser.add_argument("-R", action="store_true")
+    parser.add_argument("-h", "--human-readable", action="store_true")
+    parser.add_argument("-t", action="store_true")
     parser.add_argument("paths", nargs="*", default=["."])
 
     parsed, unknown = parser.parse_known_args(args)
@@ -87,7 +101,10 @@ def ls(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
                 if parsed.l:
                     # List detailed for file
                     meta = fs.stat(path)
-                    size = str(meta.size).rjust(8)
+                    if parsed.human_readable:
+                        size = _human_readable_size(meta.size).rjust(6)
+                    else:
+                        size = str(meta.size).rjust(8)
                     time = (
                         meta.modified_at[:16].replace("T", " ")
                         if meta.modified_at
@@ -100,11 +117,18 @@ def ls(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
 
             if parsed.l:
                 items = fs.listdir_detailed(path, recursive=parsed.R)
+                if parsed.t:
+                    items = sorted(
+                        items, key=lambda x: x.modified_at or "", reverse=True
+                    )
                 for item in items:
                     if not parsed.a and item.name.startswith("."):
                         continue
                     type_char = "d" if item.is_dir else "-"
-                    size = str(item.size).rjust(8)
+                    if parsed.human_readable:
+                        size = _human_readable_size(item.size).rjust(6)
+                    else:
+                        size = str(item.size).rjust(8)
                     time = (
                         item.modified_at[:16].replace("T", " ")
                         if item.modified_at
@@ -114,12 +138,27 @@ def ls(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
                         f"{type_char}rw-r--r-- 1 agent agent {size} {time} {item.path}\n"
                     )
             else:
-                items_str = fs.listdir(path, recursive=parsed.R)
-                filtered = [
-                    p
-                    for p in items_str
-                    if parsed.a or not p.split("/")[-1].startswith(".")
-                ]
+                if parsed.t:
+                    items_detailed = fs.listdir_detailed(
+                        path, recursive=parsed.R
+                    )
+                    items_detailed = sorted(
+                        items_detailed,
+                        key=lambda x: x.modified_at or "",
+                        reverse=True,
+                    )
+                    filtered = [
+                        item.path
+                        for item in items_detailed
+                        if parsed.a or not item.name.startswith(".")
+                    ]
+                else:
+                    items_str = fs.listdir(path, recursive=parsed.R)
+                    filtered = [
+                        p
+                        for p in items_str
+                        if parsed.a or not p.split("/")[-1].startswith(".")
+                    ]
                 if filtered:
                     stdout.write("\n".join(filtered) + "\n")
 
@@ -294,3 +333,28 @@ def rm(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
             raise
         except Exception as e:
             raise TerminalError(f"rm: {path}: {e}")
+
+
+def basename(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
+    """Strip directory and suffix from filenames."""
+    if not args:
+        raise TerminalError("basename: missing operand")
+    path = args[0]
+    name = path.rstrip("/").rsplit("/", 1)[-1] if "/" in path else path
+    if len(args) > 1:
+        suffix = args[1]
+        if name.endswith(suffix) and name != suffix:
+            name = name[: -len(suffix)]
+    stdout.write(name + "\n")
+
+
+def dirname(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
+    """Strip last component from file name."""
+    if not args:
+        raise TerminalError("dirname: missing operand")
+    path = args[0]
+    if "/" not in path:
+        stdout.write(".\n")
+    else:
+        parent = path.rstrip("/").rsplit("/", 1)[0]
+        stdout.write((parent or "/") + "\n")

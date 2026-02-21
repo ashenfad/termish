@@ -430,3 +430,89 @@ class TestPipelineIntegration:
         )
         assert "TODO" in output
         assert "main.py" in output
+
+    def test_xargs_no_run_if_empty(self, fs):
+        """xargs -r should not error on empty input."""
+        out = execute_script(to_script("echo '' | xargs -r echo hello"), fs)
+        # With our implementation, empty input always skips execution
+        assert out == ""
+
+
+# =============================================================================
+# tr tests
+# =============================================================================
+
+
+class TestTr:
+    def test_basic_translate(self, fs):
+        out = execute_script(to_script("echo 'hello' | tr 'el' 'ip'"), fs)
+        assert out == "hippo\n"
+
+    def test_delete(self, fs):
+        out = execute_script(to_script("echo 'hello world' | tr -d 'lo'"), fs)
+        assert out == "he wrd\n"
+
+    def test_squeeze(self, fs):
+        out = execute_script(
+            to_script("echo 'aabbcc' | tr -s 'abc'"), fs
+        )
+        assert out == "abc\n"
+
+    def test_character_range(self, fs):
+        out = execute_script(to_script("echo 'abc' | tr 'a-c' 'A-C'"), fs)
+        assert out == "ABC\n"
+
+    def test_upper_to_lower(self, fs):
+        out = execute_script(
+            to_script("echo 'HELLO' | tr '[:upper:]' '[:lower:]'"), fs
+        )
+        assert out == "hello\n"
+
+    def test_lower_to_upper(self, fs):
+        out = execute_script(
+            to_script("echo 'hello' | tr '[:lower:]' '[:upper:]'"), fs
+        )
+        assert out == "HELLO\n"
+
+    def test_delete_digits(self, fs):
+        out = execute_script(
+            to_script("echo 'abc123def' | tr -d '[:digit:]'"), fs
+        )
+        assert out == "abcdef\n"
+
+    def test_squeeze_spaces(self, fs):
+        out = execute_script(
+            to_script("echo 'hello    world' | tr -s '[:space:]'"), fs
+        )
+        assert out.strip() == "hello world"
+
+    def test_translate_with_squeeze(self, fs):
+        out = execute_script(
+            to_script("echo 'aabbcc' | tr -s 'abc' 'xyz'"), fs
+        )
+        assert out == "xyz\n"
+
+    def test_complement_delete(self, fs):
+        out = execute_script(
+            to_script("echo 'abc123' | tr -cd '[:digit:]'"), fs
+        )
+        assert out.rstrip("\n") == "123"
+
+
+# =============================================================================
+# sort multi-key tests
+# =============================================================================
+
+
+class TestSortMultiKey:
+    def test_multiple_k_flags(self, fs):
+        fs.write("/f.txt", b"b 2\na 1\nb 1\na 2\n")
+        out = execute_script(to_script("sort -k 1 -k 2 f.txt"), fs)
+        lines = out.strip().split("\n")
+        assert lines == ["a 1", "a 2", "b 1", "b 2"]
+
+    def test_sort_k_numeric(self, fs):
+        fs.write("/f.txt", b"x 10\nx 2\ny 1\ny 20\n")
+        out = execute_script(to_script("sort -k 2 -n f.txt"), fs)
+        lines = out.strip().split("\n")
+        assert lines == ["y 1", "x 2", "x 10", "y 20"]
