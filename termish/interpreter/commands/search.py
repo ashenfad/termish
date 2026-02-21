@@ -23,6 +23,11 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
     parser.add_argument("-A", "--after-context", type=int, default=0)
     parser.add_argument("-B", "--before-context", type=int, default=0)
     parser.add_argument("-C", "--context", type=int, default=0)
+    parser.add_argument("-c", "--count", action="store_true")
+    parser.add_argument("-w", "--word-regexp", action="store_true")
+    parser.add_argument("-o", "--only-matching", action="store_true")
+    parser.add_argument("--include", type=str, default=None)
+    parser.add_argument("--exclude", type=str, default=None)
     parser.add_argument("pattern")
     parser.add_argument("files", nargs="*")
 
@@ -44,6 +49,8 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
     pattern_str = parsed.pattern
     if parsed.fixed_strings:
         pattern_str = re.escape(pattern_str)
+    if parsed.word_regexp:
+        pattern_str = r"\b" + pattern_str + r"\b"
 
     try:
         regex = re.compile(pattern_str, flags)
@@ -56,6 +63,38 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
     def process_content(content: str, label: str | None) -> None:
         nonlocal matches_total
         lines = content.splitlines()
+
+        # Count mode
+        if parsed.count:
+            match_count = 0
+            for line in lines:
+                match = regex.search(line)
+                is_match = bool(match)
+                if parsed.invert_match:
+                    is_match = not is_match
+                if is_match:
+                    match_count += 1
+            matches_total += match_count
+            prefix = f"{label}:" if label else ""
+            stdout.write(f"{prefix}{match_count}\n")
+            return
+
+        # Only-matching mode
+        if parsed.only_matching:
+            for i, line in enumerate(lines):
+                for m in regex.finditer(line):
+                    matches_total += 1
+                    if parsed.files_with_matches:
+                        if label:
+                            stdout.write(f"{label}\n")
+                        return
+                    prefix = ""
+                    if label:
+                        prefix += f"{label}:"
+                    if parsed.line_number:
+                        prefix += f"{i + 1}:"
+                    stdout.write(f"{prefix}{m.group()}\n")
+            return
 
         if has_context:
             # Context mode: need to track which lines to print
@@ -169,6 +208,20 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
             else:
                 files_to_search.append(path)
 
+    # Apply --include/--exclude filters
+    if parsed.include:
+        files_to_search = [
+            f
+            for f in files_to_search
+            if fnmatch.fnmatch(f.split("/")[-1], parsed.include)
+        ]
+    if parsed.exclude:
+        files_to_search = [
+            f
+            for f in files_to_search
+            if not fnmatch.fnmatch(f.split("/")[-1], parsed.exclude)
+        ]
+
     multiple_files = len(files_to_search) > 1 or parsed.recursive
 
     for filepath in files_to_search:
@@ -193,6 +246,8 @@ def find(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
     parser.add_argument("path", nargs="?", default=".")
     parser.add_argument("-name")
     parser.add_argument("-type", choices=["f", "d"])
+    parser.add_argument("-maxdepth", type=int, default=None)
+    parser.add_argument("-mindepth", type=int, default=None)
 
     parsed, unknown = parser.parse_known_args(args)
     if unknown:
@@ -202,7 +257,19 @@ def find(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
     try:
         all_items = fs.listdir_detailed(root_path, recursive=True)
 
+        # Calculate base for depth computation
+        root_stripped = root_path.rstrip("/") if root_path != "/" else ""
+
         for item in all_items:
+            # Calculate depth relative to root
+            relative = item.path[len(root_stripped) :].lstrip("/")
+            depth = len(relative.split("/")) if relative else 0
+
+            if parsed.maxdepth is not None and depth > parsed.maxdepth:
+                continue
+            if parsed.mindepth is not None and depth < parsed.mindepth:
+                continue
+
             if parsed.type == "f" and item.is_dir:
                 continue
             if parsed.type == "d" and not item.is_dir:

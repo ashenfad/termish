@@ -49,6 +49,8 @@ def _parse_xargs_args(
                 null = True
             case "-t" | "--verbose":
                 verbose = True
+            case "-r" | "--no-run-if-empty":
+                pass  # Default behavior already matches -r semantics
             case s if s.startswith("-"):
                 raise TerminalError(f"xargs: unknown option: {s}")
             case _:

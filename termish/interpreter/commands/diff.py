@@ -19,6 +19,7 @@ def diff(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
     parser.add_argument("-q", "--brief", action="store_true")
     parser.add_argument("-B", "--ignore-blank-lines", action="store_true")
     parser.add_argument("-w", "--ignore-all-space", action="store_true")
+    parser.add_argument("-i", "--ignore-case", action="store_true")
     parser.add_argument("file1", nargs="?")
     parser.add_argument("file2", nargs="?")
 
@@ -52,9 +53,11 @@ def diff(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
             result = [line for line in result if line.strip()]
         if parsed.ignore_all_space:
             result = [line.replace(" ", "").replace("\t", "") for line in result]
+        if parsed.ignore_case:
+            result = [line.lower() for line in result]
         return result
 
-    if parsed.ignore_blank_lines or parsed.ignore_all_space:
+    if parsed.ignore_blank_lines or parsed.ignore_all_space or parsed.ignore_case:
         cmp1 = preprocess(file1_lines)
         cmp2 = preprocess(file2_lines)
     else:
@@ -67,20 +70,20 @@ def diff(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
             stdout.write(f"Files {parsed.file1} and {parsed.file2} differ\n")
         return
 
-    # Generate diff
+    # Generate diff (use preprocessed lines when applicable)
     if parsed.context:
         # Context format
         result = difflib.context_diff(
-            file1_lines,
-            file2_lines,
+            cmp1,
+            cmp2,
             fromfile=parsed.file1,
             tofile=parsed.file2,
         )
     else:
         # Unified format (default)
         result = difflib.unified_diff(
-            file1_lines,
-            file2_lines,
+            cmp1,
+            cmp2,
             fromfile=parsed.file1,
             tofile=parsed.file2,
         )

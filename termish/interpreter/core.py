@@ -28,6 +28,8 @@ BUILTINS: dict[str, CommandFunc] = {
     "cp": filesystem.cp,
     "mv": filesystem.mv,
     "rm": filesystem.rm,
+    "basename": filesystem.basename,
+    "dirname": filesystem.dirname,
     # I/O
     "echo": io_cmds.echo,
     "cat": io_cmds.cat,
@@ -43,6 +45,7 @@ BUILTINS: dict[str, CommandFunc] = {
     "uniq": text.uniq,
     "cut": text.cut,
     "sed": sed_cmd.sed,
+    "tr": text.tr,
     # Diff
     "diff": diff_cmd.diff,
     # Meta
