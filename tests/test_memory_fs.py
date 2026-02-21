@@ -2,7 +2,7 @@
 
 import pytest
 
-from faketerm.fs import FileSystem, MemoryFS
+from termish.fs import FileSystem, MemoryFS
 
 
 class TestProtocolCompliance:

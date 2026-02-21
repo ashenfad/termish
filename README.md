@@ -1,4 +1,4 @@
-# 📺 faketerm
+# termish 📺
 
 Virtual terminal with shell-like commands over a pluggable filesystem.
 
@@ -15,13 +15,13 @@ Parses and executes shell scripts (pipelines, redirects, semicolons) against any
 ## Install
 
 ```bash
-pip install faketerm
+pip install termish
 ```
 
 ## Quick example
 
 ```python
-from faketerm import execute, MemoryFS
+from termish import execute, MemoryFS
 
 fs = MemoryFS()
 
@@ -41,7 +41,7 @@ print(output)  # alice
 
 ## FileSystem protocol
 
-Any object implementing these 16 methods works with faketerm -- no inheritance required:
+Any object implementing these 16 methods works with termish -- no inheritance required:
 
 ```python
 class FileSystem(Protocol):

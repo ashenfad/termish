@@ -6,10 +6,10 @@ Functional implementation.
 import io
 from typing import TextIO
 
-from faketerm.ast import Pipeline, Script
-from faketerm.errors import CommandFunc, TerminalError
-from faketerm.fs import FileSystem
-from faketerm.quote_masker import mask_quotes, unmask_and_unquote
+from termish.ast import Pipeline, Script
+from termish.errors import CommandFunc, TerminalError
+from termish.fs import FileSystem
+from termish.quote_masker import mask_quotes, unmask_and_unquote
 
 from .commands import archive, filesystem, meta, search, text
 from .commands import diff as diff_cmd

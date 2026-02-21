@@ -2,7 +2,7 @@
 
 import argparse
 
-from faketerm.errors import TerminalError
+from termish.errors import TerminalError
 
 
 class CommandArgParser(argparse.ArgumentParser):

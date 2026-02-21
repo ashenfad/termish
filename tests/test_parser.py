@@ -1,6 +1,6 @@
 import pytest
 
-from faketerm.parser import ParseError, to_script
+from termish.parser import ParseError, to_script
 
 
 def test_empty_string():

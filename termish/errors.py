@@ -1,4 +1,4 @@
-"""Error types and type aliases for faketerm."""
+"""Error types and type aliases for termish."""
 
 from __future__ import annotations
 

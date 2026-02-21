@@ -4,8 +4,8 @@ Text processing commands for the terminal interpreter.
 
 from typing import TextIO
 
-from faketerm.errors import TerminalError
-from faketerm.fs import FileSystem
+from termish.errors import TerminalError
+from termish.fs import FileSystem
 
 from ._argparse import CommandArgParser
 

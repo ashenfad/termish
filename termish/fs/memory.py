@@ -17,7 +17,7 @@ def _now_iso() -> str:
 
 
 class MemoryFS:
-    """In-memory filesystem satisfying the faketerm FileSystem protocol.
+    """In-memory filesystem satisfying the termish FileSystem protocol.
 
     Files are stored as bytes. Directories are tracked explicitly.
     Timestamps are recorded for created_at and modified_at.

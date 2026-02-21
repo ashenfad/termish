@@ -1,4 +1,4 @@
-from faketerm.quote_masker import mask_quotes, unmask_and_unquote, unmask_quotes
+from termish.quote_masker import mask_quotes, unmask_and_unquote, unmask_quotes
 
 
 def test_basic_masking():

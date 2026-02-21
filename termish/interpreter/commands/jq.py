@@ -3,9 +3,9 @@
 import json
 from typing import TextIO
 
-from faketerm.errors import TerminalError
-from faketerm.fs import FileSystem
-from faketerm.jq import JqError, ParseError, evaluate, parse_filter
+from termish.errors import TerminalError
+from termish.fs import FileSystem
+from termish.jq import JqError, ParseError, evaluate, parse_filter
 
 from ._argparse import CommandArgParser
 
