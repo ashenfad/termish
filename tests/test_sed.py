@@ -218,6 +218,26 @@ class TestSedMultipleExpressions:
         # still line 4 in the original numbering
         assert out == "a\nc\n"
 
+    def test_semicolon_in_replacement(self, fs):
+        """Semicolons inside s/// replacement must not split the command."""
+        fs.write("/f.txt", b"hello\n")
+        out = execute_script(to_script("sed 's/hello/foo;bar/' f.txt"), fs)
+        assert out == "foo;bar\n"
+
+    def test_semicolon_in_pattern(self, fs):
+        """Semicolons inside s/// pattern must not split the command."""
+        fs.write("/f.txt", b"foo;bar\n")
+        out = execute_script(to_script("sed 's/foo;bar/baz/' f.txt"), fs)
+        assert out == "baz\n"
+
+    def test_semicolon_in_replacement_with_following_command(self, fs):
+        """Semicolon in replacement followed by a real semicolon-separated cmd."""
+        fs.write("/f.txt", b"a\nb\n")
+        out = execute_script(
+            to_script("sed 's/a/x;y/;2d' f.txt"), fs
+        )
+        assert out == "x;y\n"
+
 
 # ---------------------------------------------------------------------------
 # Stdin
@@ -315,3 +335,21 @@ class TestSedErrors:
         with pytest.raises(TerminalError) as exc:
             execute_script(to_script("sed 's///g' f.txt"), fs)
         assert "empty regex" in str(exc.value)
+
+    def test_trailing_characters_after_delete(self, fs):
+        fs.write("/f.txt", b"test\n")
+        with pytest.raises(TerminalError) as exc:
+            execute_script(to_script("sed '1d extra' f.txt"), fs)
+        assert "trailing characters" in str(exc.value)
+
+    def test_trailing_characters_after_print(self, fs):
+        fs.write("/f.txt", b"test\n")
+        with pytest.raises(TerminalError) as exc:
+            execute_script(to_script("sed -n '1p junk' f.txt"), fs)
+        assert "trailing characters" in str(exc.value)
+
+    def test_trailing_characters_after_substitution(self, fs):
+        fs.write("/f.txt", b"test\n")
+        with pytest.raises(TerminalError) as exc:
+            execute_script(to_script("sed 's/a/b/g extra' f.txt"), fs)
+        assert "trailing characters" in str(exc.value)

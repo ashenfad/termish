@@ -200,8 +200,8 @@ def _parse_single_command(text: str) -> _SedCommand:
     pos += 1
 
     if cmd_char == "s":
-        pattern, replacement, sub_flags, _ = _parse_substitution(text, pos)
-        return _SedCommand(
+        pattern, replacement, sub_flags, pos = _parse_substitution(text, pos)
+        cmd = _SedCommand(
             address=addr_range,
             command="s",
             pattern=pattern,
@@ -209,9 +209,15 @@ def _parse_single_command(text: str) -> _SedCommand:
             sub_flags=sub_flags,
         )
     elif cmd_char in ("p", "d"):
-        return _SedCommand(address=addr_range, command=cmd_char)
+        cmd = _SedCommand(address=addr_range, command=cmd_char)
     else:
         raise TerminalError(f"sed: unknown command: '{cmd_char}'")
+
+    trailing = text[pos:].strip()
+    if trailing:
+        raise TerminalError(f"sed: trailing characters: '{trailing}'")
+
+    return cmd
 
 
 def _split_script(script: str) -> list[str]:
@@ -219,30 +225,31 @@ def _split_script(script: str) -> list[str]:
     parts: list[str] = []
     current: list[str] = []
     i = 0
-    in_delim = False
+    # For s commands we need to skip past all 3 delimiters (s/pat/repl/flags)
     delim_char = ""
+    delim_remaining = 0  # number of closing delimiters still expected
 
     while i < len(script):
         ch = script[i]
 
-        if in_delim:
+        if delim_remaining > 0:
             current.append(ch)
             if ch == "\\" and i + 1 < len(script):
                 current.append(script[i + 1])
                 i += 2
                 continue
             if ch == delim_char:
-                in_delim = False
+                delim_remaining -= 1
             i += 1
             continue
 
-        if ch == "s" and not in_delim:
+        if ch == "s":
             current.append(ch)
             i += 1
             # Next char is the delimiter
             if i < len(script) and not script[i].isalnum():
                 delim_char = script[i]
-                in_delim = True
+                delim_remaining = 2  # expect 2 more closing delimiters
                 current.append(script[i])
                 i += 1
             continue
@@ -365,7 +372,8 @@ def _process_content(
 
             if cmd.command == "s":
                 count = 0 if "g" in cmd.sub_flags else 1
-                new_content, num_subs = cmd.pattern.subn(  # type: ignore[union-attr]
+                assert cmd.pattern is not None
+                new_content, num_subs = cmd.pattern.subn(
                     cmd.replacement, line_content, count=count
                 )
                 line_content = new_content
