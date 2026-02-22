@@ -10,7 +10,10 @@ requires-python = ">=3.10"
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-timeout"]
+dev = ["pytest", "pytest-timeout", "monkeyfs"]
+
+[tool.uv.sources]
+monkeyfs = { path = "../monkeyfs", editable = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
