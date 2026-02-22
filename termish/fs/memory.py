@@ -120,7 +120,10 @@ class MemoryFS:
 
     # -- directory operations --
 
-    def mkdir(self, path: str, exist_ok: bool = False) -> None:
+    def mkdir(self, path: str, parents: bool = False, exist_ok: bool = False) -> None:
+        if parents:
+            self.makedirs(path, exist_ok=exist_ok)
+            return
         path = self._resolve(path)
         if path in self._dirs:
             if exist_ok:
@@ -207,7 +210,7 @@ class MemoryFS:
 
     # -- listing --
 
-    def list(self, path: str = "/", recursive: bool = False) -> list[str]:
+    def list(self, path: str = ".", recursive: bool = False) -> list[str]:
         path = self._resolve(path)
         if path not in self._dirs:
             raise FileNotFoundError(_errno.ENOENT, "No such directory", path)
@@ -236,7 +239,7 @@ class MemoryFS:
         return sorted(entries)
 
     def list_detailed(
-        self, path: str = "/", recursive: bool = False
+        self, path: str = ".", recursive: bool = False
     ) -> list[FileInfo]:
         path = self._resolve(path)
         if path not in self._dirs:
