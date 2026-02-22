@@ -94,7 +94,7 @@ class FileSystem(Protocol):
         """Return metadata for a path."""
         ...
 
-    def mkdir(self, path: str, exist_ok: bool = False) -> None:
+    def mkdir(self, path: str, parents: bool = False, exist_ok: bool = False) -> None:
         """Create a directory."""
         ...
 
@@ -114,7 +114,7 @@ class FileSystem(Protocol):
         """Rename or move a file or directory."""
         ...
 
-    def list(self, path: str = "/", recursive: bool = False) -> list[str]:
+    def list(self, path: str = ".", recursive: bool = False) -> list[str]:
         """List directory contents as paths.
 
         Args:
@@ -124,7 +124,7 @@ class FileSystem(Protocol):
         ...
 
     def list_detailed(
-        self, path: str = "/", recursive: bool = False
+        self, path: str = ".", recursive: bool = False
     ) -> list[FileInfo]:
         """List directory contents with full metadata.
 
