@@ -99,7 +99,7 @@ class TestVirtualFSProtocol:
     def test_list_detailed(self):
         fs = monkeyfs.VirtualFS({})
         fs.write("/f.txt", b"hello")
-        fs.write("/d/inner.txt", b"data")
+        fs.mkdir("/d")
         infos = fs.list_detailed("/")
         names = [i.name for i in infos]
         assert "f.txt" in names
