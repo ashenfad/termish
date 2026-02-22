@@ -186,7 +186,7 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
         if parsed.recursive:
             root = "."
             try:
-                all_files = fs.listdir_detailed(root, recursive=True)
+                all_files = fs.list_detailed(root, recursive=True)
                 for f in all_files:
                     if not f.is_dir:
                         files_to_search.append(f.path)
@@ -197,7 +197,7 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
             if fs.isdir(path):
                 if parsed.recursive:
                     try:
-                        all_files = fs.listdir_detailed(path, recursive=True)
+                        all_files = fs.list_detailed(path, recursive=True)
                         for f in all_files:
                             if not f.is_dir:
                                 files_to_search.append(f.path)
@@ -255,7 +255,7 @@ def find(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
 
     root_path = parsed.path
     try:
-        all_items = fs.listdir_detailed(root_path, recursive=True)
+        all_items = fs.list_detailed(root_path, recursive=True)
 
         # Calculate base for depth computation
         root_stripped = root_path.rstrip("/") if root_path != "/" else ""

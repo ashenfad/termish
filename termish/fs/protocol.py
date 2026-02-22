@@ -4,6 +4,8 @@ Defines the structural interface that any filesystem must satisfy
 to work with termish's terminal commands.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
@@ -112,7 +114,7 @@ class FileSystem(Protocol):
         """Rename or move a file or directory."""
         ...
 
-    def listdir(self, path: str = "/", recursive: bool = False) -> list[str]:
+    def list(self, path: str = "/", recursive: bool = False) -> list[str]:
         """List directory contents as paths.
 
         Args:
@@ -121,7 +123,7 @@ class FileSystem(Protocol):
         """
         ...
 
-    def listdir_detailed(
+    def list_detailed(
         self, path: str = "/", recursive: bool = False
     ) -> list[FileInfo]:
         """List directory contents with full metadata.
