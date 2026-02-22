@@ -63,6 +63,10 @@ class FileSystem(Protocol):
     def glob(self, pattern: str) -> list[str]: ...
 ```
 
+## Compatible filesystems
+
+[monkeyfs](https://github.com/ashenfad/monkeyfs) `VirtualFS` and `IsolatedFS` both satisfy the termish `FileSystem` protocol and can be passed directly to `execute()`.
+
 ## Builtin commands
 
 | Category | Commands |
