@@ -173,7 +173,7 @@ def _add_to_tar(
             stdout.write(f"{arcname}/\n")
 
         # Recursively add contents
-        for name in fs.listdir(file_path):
+        for name in fs.list(file_path):
             child_path = posixpath.join(file_path, name)
             child_arcname = posixpath.join(arcname, name)
             _add_to_tar(tf, child_path, child_arcname, verbose, stdout, fs)
@@ -317,7 +317,7 @@ def _add_to_zip(
         zf.writestr(arcname.rstrip("/") + "/", "")
 
         # Recursively add contents
-        for name in fs.listdir(file_path):
+        for name in fs.list(file_path):
             child_path = posixpath.join(file_path, name)
             child_arcname = posixpath.join(arcname, name)
             _add_to_zip(zf, child_path, child_arcname, recursive, fs)

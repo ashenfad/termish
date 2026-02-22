@@ -4,6 +4,8 @@ Provides a simple, self-contained filesystem for testing and lightweight use.
 All data lives in Python dicts — nothing touches disk.
 """
 
+from __future__ import annotations
+
 import errno as _errno
 import fnmatch
 import posixpath
@@ -205,7 +207,7 @@ class MemoryFS:
 
     # -- listing --
 
-    def listdir(self, path: str = "/", recursive: bool = False) -> list[str]:
+    def list(self, path: str = "/", recursive: bool = False) -> list[str]:
         path = self._resolve(path)
         if path not in self._dirs:
             raise FileNotFoundError(_errno.ENOENT, "No such directory", path)
@@ -233,7 +235,7 @@ class MemoryFS:
                     entries.add(rest.split("/")[0])
         return sorted(entries)
 
-    def listdir_detailed(
+    def list_detailed(
         self, path: str = "/", recursive: bool = False
     ) -> list[FileInfo]:
         path = self._resolve(path)

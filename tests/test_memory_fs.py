@@ -119,30 +119,30 @@ class TestDirectoryOps:
         with pytest.raises(FileNotFoundError):
             fs.rmdir("/nope")
 
-    def test_listdir_basic(self):
+    def test_list_basic(self):
         fs = MemoryFS()
         fs.write("/a.txt", b"")
         fs.write("/b.txt", b"")
         fs.mkdir("/sub")
-        entries = fs.listdir("/")
+        entries = fs.list("/")
         assert "a.txt" in entries
         assert "b.txt" in entries
         assert "sub" in entries
 
-    def test_listdir_recursive(self):
+    def test_list_recursive(self):
         fs = MemoryFS()
         fs.write("/d/a.txt", b"")
         fs.write("/d/sub/b.txt", b"")
-        entries = fs.listdir("/d", recursive=True)
+        entries = fs.list("/d", recursive=True)
         # Should include nested paths
         assert any("a.txt" in e for e in entries)
         assert any("b.txt" in e for e in entries)
 
-    def test_listdir_detailed(self):
+    def test_list_detailed(self):
         fs = MemoryFS()
         fs.write("/f.txt", b"hello")
         fs.mkdir("/d")
-        infos = fs.listdir_detailed("/")
+        infos = fs.list_detailed("/")
         names = [i.name for i in infos]
         assert "f.txt" in names
         assert "d" in names

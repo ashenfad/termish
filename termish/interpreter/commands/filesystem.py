@@ -116,7 +116,7 @@ def ls(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
                 continue
 
             if parsed.l:
-                items = fs.listdir_detailed(path, recursive=parsed.R)
+                items = fs.list_detailed(path, recursive=parsed.R)
                 if parsed.t:
                     items = sorted(
                         items, key=lambda x: x.modified_at or "", reverse=True
@@ -139,7 +139,7 @@ def ls(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
                     )
             else:
                 if parsed.t:
-                    items_detailed = fs.listdir_detailed(
+                    items_detailed = fs.list_detailed(
                         path, recursive=parsed.R
                     )
                     items_detailed = sorted(
@@ -153,7 +153,7 @@ def ls(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
                         if parsed.a or not item.name.startswith(".")
                     ]
                 else:
-                    items_str = fs.listdir(path, recursive=parsed.R)
+                    items_str = fs.list(path, recursive=parsed.R)
                     filtered = [
                         p
                         for p in items_str
@@ -196,7 +196,7 @@ def _copy_recursive(src: str, dst: str, fs: FileSystem) -> None:
     if not fs.exists(dst):
         fs.mkdir(dst)
 
-    for item in fs.listdir_detailed(src, recursive=False):
+    for item in fs.list_detailed(src, recursive=False):
         name = item.path.rstrip("/").split("/")[-1]
         src_path = f"{src.rstrip('/')}/{name}"
         dst_path = f"{dst.rstrip('/')}/{name}"
@@ -285,7 +285,7 @@ def mv(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
 
 def _remove_recursive(path: str, fs: FileSystem) -> None:
     """Recursively remove directory and contents."""
-    for item in fs.listdir_detailed(path, recursive=False):
+    for item in fs.list_detailed(path, recursive=False):
         name = item.path.rstrip("/").split("/")[-1]
         item_path = f"{path.rstrip('/')}/{name}"
 
