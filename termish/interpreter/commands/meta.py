@@ -8,6 +8,9 @@ from typing import TYPE_CHECKING, TextIO
 from termish.errors import TerminalError
 from termish.fs import FileSystem
 
+_MAX_XARGS_DEPTH = 16
+_xargs_depth = 0
+
 if TYPE_CHECKING:
     from termish.errors import CommandFunc
 
@@ -64,6 +67,13 @@ def _parse_xargs_args(
 
 def xargs(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
     """Build and execute commands from standard input."""
+    global _xargs_depth
+
+    if _xargs_depth >= _MAX_XARGS_DEPTH:
+        raise TerminalError(
+            f"xargs: maximum recursion depth exceeded ({_MAX_XARGS_DEPTH})"
+        )
+
     replace, max_args, null, verbose, cmd_name, cmd_base_args = _parse_xargs_args(
         args
     )
@@ -93,12 +103,18 @@ def xargs(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> Non
 
     def execute_cmd(cmd_args: list[str]) -> None:
         """Execute command with given args and write output to stdout."""
+        global _xargs_depth
+
         if verbose:
             stdout.write(f"{cmd_name} {' '.join(cmd_args)}\n")
 
         cmd_stdin = io.StringIO()
         cmd_stdout = io.StringIO()
-        cmd_func(cmd_args, cmd_stdin, cmd_stdout, fs)
+        _xargs_depth += 1
+        try:
+            cmd_func(cmd_args, cmd_stdin, cmd_stdout, fs)
+        finally:
+            _xargs_depth -= 1
         stdout.write(cmd_stdout.getvalue())
 
     if replace:
