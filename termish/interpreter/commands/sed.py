@@ -11,7 +11,6 @@ from termish.fs import FileSystem
 
 from ._argparse import CommandArgParser
 
-
 # ---------------------------------------------------------------------------
 # Data model
 # ---------------------------------------------------------------------------
@@ -131,9 +130,7 @@ def _parse_address(text: str, pos: int) -> tuple[_Address | None, int]:
     return None, pos
 
 
-def _parse_substitution(
-    text: str, pos: int
-) -> tuple[re.Pattern[str], str, str, int]:
+def _parse_substitution(text: str, pos: int) -> tuple[re.Pattern[str], str, str, int]:
     """Parse ``s/pattern/replacement/flags`` starting after the ``s``.
 
     Returns (compiled_pattern, translated_replacement, flags, new_pos).
@@ -313,15 +310,11 @@ def _check_address(
 
     # Range address
     if range_active[idx]:
-        if _single_addr_matches(
-            addr_range.addr2, line_num, total_lines, line_content
-        ):
+        if _single_addr_matches(addr_range.addr2, line_num, total_lines, line_content):
             range_active[idx] = False
         return True
     else:
-        if _single_addr_matches(
-            addr_range.addr1, line_num, total_lines, line_content
-        ):
+        if _single_addr_matches(addr_range.addr1, line_num, total_lines, line_content):
             range_active[idx] = True
             if _single_addr_matches(
                 addr_range.addr2, line_num, total_lines, line_content
@@ -331,9 +324,7 @@ def _check_address(
         return False
 
 
-def _process_content(
-    content: str, commands: list[_SedCommand], suppress: bool
-) -> str:
+def _process_content(content: str, commands: list[_SedCommand], suppress: bool) -> str:
     """Apply sed commands to *content*. Returns processed text."""
     if not content:
         return ""

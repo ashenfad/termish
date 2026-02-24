@@ -77,9 +77,7 @@ def xargs(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> Non
             f"xargs: maximum recursion depth exceeded ({_MAX_XARGS_DEPTH})"
         )
 
-    replace, max_args, null, verbose, cmd_name, cmd_base_args = _parse_xargs_args(
-        args
-    )
+    replace, max_args, null, verbose, cmd_name, cmd_base_args = _parse_xargs_args(args)
 
     # Import BUILTINS here to avoid circular import
     from termish.interpreter.core import BUILTINS

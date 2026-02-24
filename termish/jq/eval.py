@@ -822,7 +822,7 @@ def _call_function(name: str, args: list[Expr], data: Any) -> Iterator[Any]:
                 "from_entries",
             ]
             raise JqError(
-                f"Unknown function: {name}(). " f"Common functions: {', '.join(common)}"
+                f"Unknown function: {name}(). Common functions: {', '.join(common)}"
             )
 
 

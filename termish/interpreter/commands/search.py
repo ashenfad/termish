@@ -142,7 +142,7 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
                 if label:
                     prefix += f"{label}{separator}"
                 if parsed.line_number:
-                    prefix += f"{idx+1}{separator}"
+                    prefix += f"{idx + 1}{separator}"
 
                 if prefix:
                     stdout.write(f"{prefix}{line}\n")
@@ -168,7 +168,7 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
                     if label:
                         prefix += f"{label}:"
                     if parsed.line_number:
-                        prefix += f"{i+1}:"
+                        prefix += f"{i + 1}:"
 
                     if prefix:
                         stdout.write(f"{prefix}{line}\n")

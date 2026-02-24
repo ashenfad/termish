@@ -123,9 +123,7 @@ class FileSystem(Protocol):
         """
         ...
 
-    def list_detailed(
-        self, path: str = ".", recursive: bool = False
-    ) -> list[FileInfo]:
+    def list_detailed(self, path: str = ".", recursive: bool = False) -> list[FileInfo]:
         """List directory contents with full metadata.
 
         Args:

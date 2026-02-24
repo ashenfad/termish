@@ -192,7 +192,7 @@ class MemoryFS:
             # Move children
             for d in list(self._dirs):
                 if d.startswith(src_prefix):
-                    new_d = dst + d[len(src):]
+                    new_d = dst + d[len(src) :]
                     self._dirs.discard(d)
                     self._dirs.add(new_d)
                     ts = self._timestamps.pop(d, None)
@@ -200,7 +200,7 @@ class MemoryFS:
                         self._timestamps[new_d] = ts
             for f in list(self._files):
                 if f.startswith(src_prefix):
-                    new_f = dst + f[len(src):]
+                    new_f = dst + f[len(src) :]
                     self._files[new_f] = self._files.pop(f)
                     ts = self._timestamps.pop(f, None)
                     if ts:
@@ -220,27 +220,25 @@ class MemoryFS:
             results: list[str] = []
             for f in sorted(self._files):
                 if f.startswith(prefix):
-                    results.append(f[len(prefix):])
+                    results.append(f[len(prefix) :])
             for d in sorted(self._dirs):
                 if d.startswith(prefix) and d != path:
-                    results.append(d[len(prefix):])
+                    results.append(d[len(prefix) :])
             return sorted(results)
 
         entries: set[str] = set()
         for f in self._files:
             if f.startswith(prefix):
-                rest = f[len(prefix):]
+                rest = f[len(prefix) :]
                 entries.add(rest.split("/")[0])
         for d in self._dirs:
             if d.startswith(prefix) and d != path:
-                rest = d[len(prefix):]
+                rest = d[len(prefix) :]
                 if rest:
                     entries.add(rest.split("/")[0])
         return sorted(entries)
 
-    def list_detailed(
-        self, path: str = ".", recursive: bool = False
-    ) -> list[FileInfo]:
+    def list_detailed(self, path: str = ".", recursive: bool = False) -> list[FileInfo]:
         path = self._resolve(path)
         if path not in self._dirs:
             raise FileNotFoundError(_errno.ENOENT, "No such directory", path)
@@ -252,33 +250,37 @@ class MemoryFS:
             for f in sorted(self._files):
                 if f.startswith(prefix):
                     ts = self._timestamps.get(f, ("", ""))
-                    results.append(FileInfo(
-                        name=posixpath.basename(f),
-                        path=f,
-                        size=len(self._files[f]),
-                        created_at=ts[0],
-                        modified_at=ts[1],
-                        is_dir=False,
-                    ))
+                    results.append(
+                        FileInfo(
+                            name=posixpath.basename(f),
+                            path=f,
+                            size=len(self._files[f]),
+                            created_at=ts[0],
+                            modified_at=ts[1],
+                            is_dir=False,
+                        )
+                    )
                     seen.add(f)
             for d in sorted(self._dirs):
                 if d.startswith(prefix) and d != path and d not in seen:
                     ts = self._timestamps.get(d, ("", ""))
-                    results.append(FileInfo(
-                        name=posixpath.basename(d),
-                        path=d,
-                        size=0,
-                        created_at=ts[0],
-                        modified_at=ts[1],
-                        is_dir=True,
-                    ))
+                    results.append(
+                        FileInfo(
+                            name=posixpath.basename(d),
+                            path=d,
+                            size=0,
+                            created_at=ts[0],
+                            modified_at=ts[1],
+                            is_dir=True,
+                        )
+                    )
             return results
 
         # Non-recursive: direct children only
         entries: dict[str, FileInfo] = {}
         for f in self._files:
             if f.startswith(prefix):
-                rest = f[len(prefix):]
+                rest = f[len(prefix) :]
                 child_name = rest.split("/")[0]
                 if "/" in rest:
                     # Implicit subdirectory
@@ -305,7 +307,7 @@ class MemoryFS:
                     )
         for d in self._dirs:
             if d.startswith(prefix) and d != path:
-                rest = d[len(prefix):]
+                rest = d[len(prefix) :]
                 child_name = rest.split("/")[0]
                 if child_name not in entries:
                     child_path = prefix + child_name

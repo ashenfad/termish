@@ -282,9 +282,7 @@ class TestGrepFlags:
         fs.mkdir("/src")
         fs.write("/src/a.py", b"TODO: fix\n")
         fs.write("/src/a.txt", b"TODO: fix\n")
-        out = execute_script(
-            to_script("grep -r --include '*.py' TODO /src"), fs
-        )
+        out = execute_script(to_script("grep -r --include '*.py' TODO /src"), fs)
         assert "a.py" in out
         assert "a.txt" not in out
 
@@ -292,9 +290,7 @@ class TestGrepFlags:
         fs.mkdir("/src")
         fs.write("/src/a.py", b"TODO: fix\n")
         fs.write("/src/a.txt", b"TODO: fix\n")
-        out = execute_script(
-            to_script("grep -r --exclude '*.txt' TODO /src"), fs
-        )
+        out = execute_script(to_script("grep -r --exclude '*.txt' TODO /src"), fs)
         assert "a.py" in out
         assert "a.txt" not in out
 
@@ -339,10 +335,10 @@ class TestLsFlags:
         fs.write("/b.txt", b"b")
         # b.txt written second, should appear first with -t
         out = execute_script(to_script("ls -lt /"), fs)
-        lines = [l for l in out.strip().split("\n") if l]
+        lines = [line for line in out.strip().split("\n") if line]
         # b.txt should come before a.txt
-        b_idx = next(i for i, l in enumerate(lines) if "b.txt" in l)
-        a_idx = next(i for i, l in enumerate(lines) if "a.txt" in l)
+        b_idx = next(i for i, line in enumerate(lines) if "b.txt" in line)
+        a_idx = next(i for i, line in enumerate(lines) if "a.txt" in line)
         assert b_idx < a_idx
 
 
@@ -370,7 +366,9 @@ class TestDiffIgnoreCase:
 
 class TestBasenameDirname:
     def test_basename_basic(self, fs):
-        out = execute_script(to_script("echo /usr/local/bin/python | xargs basename"), fs)
+        out = execute_script(
+            to_script("echo /usr/local/bin/python | xargs basename"), fs
+        )
         assert out.strip() == "python"
 
     def test_basename_suffix(self, fs):
@@ -436,7 +434,5 @@ class TestConditionalOperators:
         assert out == "yes\n"
 
     def test_mixed_operators(self, fs):
-        out = execute_script(
-            to_script("echo a ; echo b && echo c"), fs
-        )
+        out = execute_script(to_script("echo a ; echo b && echo c"), fs)
         assert out == "a\nb\nc\n"
