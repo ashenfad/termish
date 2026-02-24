@@ -327,13 +327,12 @@ class TestXargs:
         """xargs should reject calls when the depth limit is reached."""
         import termish.interpreter.commands.meta as meta
 
-        old = meta._xargs_depth
-        meta._xargs_depth = meta._MAX_XARGS_DEPTH
+        token = meta._xargs_depth.set(meta._MAX_XARGS_DEPTH)
         try:
             with pytest.raises(TerminalError, match="maximum recursion depth"):
                 execute_script(to_script("echo x | xargs echo"), fs)
         finally:
-            meta._xargs_depth = old
+            meta._xargs_depth.reset(token)
 
 
 # =============================================================================
