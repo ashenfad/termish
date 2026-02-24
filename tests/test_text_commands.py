@@ -323,6 +323,18 @@ class TestXargs:
         # Should print the command being executed
         assert "echo test" in output
 
+    def test_xargs_recursion_guard(self, fs):
+        """xargs should reject calls when the depth limit is reached."""
+        import termish.interpreter.commands.meta as meta
+
+        old = meta._xargs_depth
+        meta._xargs_depth = meta._MAX_XARGS_DEPTH
+        try:
+            with pytest.raises(TerminalError, match="maximum recursion depth"):
+                execute_script(to_script("echo x | xargs echo"), fs)
+        finally:
+            meta._xargs_depth = old
+
 
 # =============================================================================
 # cp -r and rm -r tests
