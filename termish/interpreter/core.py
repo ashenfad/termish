@@ -64,7 +64,11 @@ BUILTINS: dict[str, CommandFunc] = {
 def execute_script(script: Script, fs: FileSystem) -> str:
     """
     Execute a full script and return the final stdout.
-    Stop on first failure (set -e).
+
+    Operators between pipelines control execution flow:
+    - ``;``  — always execute next pipeline
+    - ``&&`` — execute next only if previous succeeded
+    - ``||`` — execute next only if previous failed
 
     Args:
         script: The parsed AST.
@@ -74,19 +78,37 @@ def execute_script(script: Script, fs: FileSystem) -> str:
         Captured stdout as a string.
 
     Raises:
-        TerminalError: If execution fails (contains partial output).
+        TerminalError: If the last executed pipeline failed (contains partial output).
     """
     final_output = io.StringIO()
+    last_succeeded = True
+    last_error: TerminalError | None = None
 
-    try:
-        for pipeline in script.pipelines:
+    for i, pipeline in enumerate(script.pipelines):
+        # Determine whether to execute this pipeline based on the preceding operator
+        if i > 0:
+            op = script.operators[i - 1]
+            if op == "&&" and not last_succeeded:
+                continue
+            elif op == "||" and last_succeeded:
+                continue
+            # ";" always executes
+
+        try:
             _execute_pipeline(pipeline, fs, final_output)
-    except TerminalError as e:
-        raise TerminalError(e.message, partial_output=final_output.getvalue()) from e
-    except Exception as e:
+            last_succeeded = True
+            last_error = None
+        except TerminalError as e:
+            last_succeeded = False
+            last_error = e
+        except Exception as e:
+            last_succeeded = False
+            last_error = TerminalError(f"Unexpected error: {e}")
+
+    if last_error is not None:
         raise TerminalError(
-            f"Unexpected error: {e}", partial_output=final_output.getvalue()
-        ) from e
+            last_error.message, partial_output=final_output.getvalue()
+        )
 
     return final_output.getvalue()
 

@@ -1,6 +1,6 @@
 """termish: Virtual terminal with shell-like commands over a pluggable filesystem."""
 
-from .ast import Command, Pipeline, Redirect, Script
+from .ast import Command, Operator, Pipeline, Redirect, Script
 from .errors import TerminalError
 from .fs import FileInfo, FileMetadata, FileSystem, MemoryFS
 from .interpreter import execute_script
@@ -9,6 +9,7 @@ from .parser import ParseError, to_script
 __all__ = [
     "Command",
     "FileInfo",
+    "Operator",
     "FileMetadata",
     "FileSystem",
     "MemoryFS",

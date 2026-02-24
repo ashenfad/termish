@@ -91,20 +91,25 @@ def test_quoted_wildcard(fs):
     assert "*" in output
 
 
-def test_script_error_stops_execution(fs):
-    # set -e behavior
+def test_semicolon_continues_on_error(fs):
+    """Semicolons (and newlines) always continue, matching bash behavior."""
     script_text = """
     cd /nonexistent
-    echo 'Should not run'
+    echo 'Should still run'
     """
 
-    # Now that we raise TerminalError, execution stops and we can catch it
-    with pytest.raises(TerminalError) as excinfo:
-        execute_script(to_script(script_text), fs)
+    # With bash-style ;, the second command runs despite the first failing.
+    # The last pipeline succeeded, so no error is raised.
+    output = execute_script(to_script(script_text), fs)
+    assert "Should still run" in output
 
+
+def test_semicolon_raises_if_last_fails(fs):
+    """If the last pipeline fails, the error is still raised."""
+    with pytest.raises(TerminalError) as excinfo:
+        execute_script(to_script("echo ok ; cd /nonexistent"), fs)
     assert "cd: no such file" in str(excinfo.value)
-    # The partial output should NOT contain "Should not run"
-    assert "Should not run" not in excinfo.value.partial_output
+    assert "ok" in excinfo.value.partial_output
 
 
 def test_grep_context_after(fs):
@@ -383,3 +388,55 @@ class TestBasenameDirname:
     def test_dirname_root(self, fs):
         out = execute_script(to_script("dirname /file.txt"), fs)
         assert out.strip() == "/"
+
+
+# ---------------------------------------------------------------------------
+# && and || operators
+# ---------------------------------------------------------------------------
+
+
+class TestConditionalOperators:
+    def test_and_both_succeed(self, fs):
+        out = execute_script(to_script("echo a && echo b"), fs)
+        assert out == "a\nb\n"
+
+    def test_and_first_fails(self, fs):
+        """&& skips the second command when the first fails."""
+        with pytest.raises(TerminalError):
+            execute_script(to_script("cd /nonexistent && echo no"), fs)
+
+    def test_and_first_fails_no_second(self, fs):
+        """The skipped command should not produce output."""
+        try:
+            execute_script(to_script("cd /nonexistent && echo no"), fs)
+        except TerminalError as e:
+            assert "no" not in (e.partial_output or "")
+
+    def test_or_first_fails(self, fs):
+        """|| runs the second command when the first fails."""
+        out = execute_script(to_script("cd /nonexistent || echo fallback"), fs)
+        assert out == "fallback\n"
+
+    def test_or_first_succeeds(self, fs):
+        """|| skips the second command when the first succeeds."""
+        out = execute_script(to_script("echo ok || echo no"), fs)
+        assert out == "ok\n"
+
+    def test_chain_and_then_or(self, fs):
+        """cmd1 && cmd2 || cmd3 — if cmd1 succeeds, cmd2 runs; if cmd2 fails, cmd3 runs."""
+        out = execute_script(
+            to_script("echo first && cd /nonexistent || echo recovered"), fs
+        )
+        assert "first" in out
+        assert "recovered" in out
+
+    def test_semicolon_always_continues(self, fs):
+        """Semicolons always continue regardless of failure."""
+        out = execute_script(to_script("cd /nonexistent ; echo yes"), fs)
+        assert out == "yes\n"
+
+    def test_mixed_operators(self, fs):
+        out = execute_script(
+            to_script("echo a ; echo b && echo c"), fs
+        )
+        assert out == "a\nb\nc\n"

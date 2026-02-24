@@ -14,6 +14,12 @@ from typing import Literal
 # >> : Output to file (append)
 RedirectType = Literal["<", ">", ">>"]
 
+# Operators between pipelines:
+# ;  : Always execute next (bash-style unconditional)
+# && : Execute next only if previous succeeded
+# || : Execute next only if previous failed
+Operator = Literal[";", "&&", "||"]
+
 
 @dataclass(frozen=True)
 class Node:
@@ -75,11 +81,13 @@ class Script(Node):
     Represents a full script containing multiple pipelines.
 
     Example:
-        cd /tmp
-        ls -la | grep .log
+        cd /tmp && ls -la | grep .log
 
     Attributes:
-        pipelines: List of Pipeline nodes to be executed sequentially.
+        pipelines: List of Pipeline nodes to be executed.
+        operators: Operators between pipelines. operators[i] separates
+                   pipelines[i] and pipelines[i+1]. Length is len(pipelines) - 1.
     """
 
     pipelines: list[Pipeline]
+    operators: list[Operator] = field(default_factory=list)
