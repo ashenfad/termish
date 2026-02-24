@@ -92,9 +92,50 @@ def test_redirect_location_independence():
 def test_multiple_pipelines_semicolon():
     script = to_script("cd /tmp; ls")
     assert len(script.pipelines) == 2
+    assert script.operators == [";"]
 
     assert script.pipelines[0].commands[0].name == "cd"
     assert script.pipelines[1].commands[0].name == "ls"
+
+
+def test_and_operator():
+    script = to_script("echo a && echo b")
+    assert len(script.pipelines) == 2
+    assert script.operators == ["&&"]
+
+    assert script.pipelines[0].commands[0].name == "echo"
+    assert script.pipelines[0].commands[0].args == ["a"]
+    assert script.pipelines[1].commands[0].name == "echo"
+    assert script.pipelines[1].commands[0].args == ["b"]
+
+
+def test_or_operator():
+    script = to_script("cd /nonexistent || echo fallback")
+    assert len(script.pipelines) == 2
+    assert script.operators == ["||"]
+
+    assert script.pipelines[0].commands[0].name == "cd"
+    assert script.pipelines[1].commands[0].name == "echo"
+
+
+def test_mixed_operators():
+    script = to_script("cmd1 && cmd2 || cmd3 ; cmd4")
+    assert len(script.pipelines) == 4
+    assert script.operators == ["&&", "||", ";"]
+
+
+def test_newline_maps_to_semicolon():
+    script = to_script("echo a\necho b")
+    assert len(script.pipelines) == 2
+    assert script.operators == [";"]
+
+
+def test_redirect_before_and_or():
+    with pytest.raises(ParseError, match="Expected filename"):
+        to_script("ls > &&")
+
+    with pytest.raises(ParseError, match="Expected filename"):
+        to_script("ls > ||")
 
 
 def test_punctuation_no_spaces():

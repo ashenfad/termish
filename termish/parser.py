@@ -1,7 +1,7 @@
 import re
 import shlex
 
-from .ast import Command, Pipeline, Redirect, Script
+from .ast import Command, Operator, Pipeline, Redirect, Script
 from .quote_masker import mask_quotes, unmask_quotes
 
 
@@ -69,12 +69,14 @@ def _parse_tokens(tokens: list[str], mask_map: dict[str, str]) -> Script:
     Convert a list of tokens into a Script.
 
     Structure:
-    Script = Pipeline { (";" | NEWLINE) Pipeline }*
+    Script = Pipeline { (";" | "&&" | "||" | NEWLINE) Pipeline }*
     Pipeline = Command { "|" Command }*
     Command = Word { Arg | Redirect }*
     """
     pipelines: list[Pipeline] = []
+    operators: list[Operator] = []
     current_pipeline_cmds: list[Command] = []
+    pending_op: Operator | None = None
 
     # Iterator for consumption
     it = iter(tokens)
@@ -94,11 +96,14 @@ def _parse_tokens(tokens: list[str], mask_map: dict[str, str]) -> Script:
         cmd_args = []
         cmd_redirects = []
 
-    def flush_pipeline():
-        nonlocal current_pipeline_cmds
+    def flush_pipeline(op: Operator):
+        nonlocal current_pipeline_cmds, pending_op
         flush_command()
         if current_pipeline_cmds:
+            if pending_op is not None:
+                operators.append(pending_op)
             pipelines.append(Pipeline(commands=current_pipeline_cmds))
+            pending_op = op
         current_pipeline_cmds = []
 
     def unmask(token: str) -> str:
@@ -108,8 +113,9 @@ def _parse_tokens(tokens: list[str], mask_map: dict[str, str]) -> Script:
         while True:
             token = next(it)
 
-            if token == ";" or token == "\n":
-                flush_pipeline()
+            if token in (";", "\n", "&&", "||"):
+                op: Operator = ";" if token == "\n" else token  # type: ignore[assignment]
+                flush_pipeline(op)
                 continue
 
             elif token == "|":
@@ -123,7 +129,7 @@ def _parse_tokens(tokens: list[str], mask_map: dict[str, str]) -> Script:
                 try:
                     target = next(it)
                     # Check if target is another operator
-                    if target in (";", "|", ">", ">>", "<", "\n"):
+                    if target in (";", "|", ">", ">>", "<", "\n", "&&", "||"):
                         raise ParseError(
                             f"Expected filename after '{token}', got '{target}'"
                         )
@@ -146,7 +152,7 @@ def _parse_tokens(tokens: list[str], mask_map: dict[str, str]) -> Script:
     except StopIteration:
         pass
 
-    # Final flush
-    flush_pipeline()
+    # Final flush — use ";" as a dummy op (won't be appended since there's no next pipeline)
+    flush_pipeline(";")
 
-    return Script(pipelines=pipelines)
+    return Script(pipelines=pipelines, operators=operators)
