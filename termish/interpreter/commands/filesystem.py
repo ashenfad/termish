@@ -139,9 +139,7 @@ def ls(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
                     )
             else:
                 if parsed.t:
-                    items_detailed = fs.list_detailed(
-                        path, recursive=parsed.R
-                    )
+                    items_detailed = fs.list_detailed(path, recursive=parsed.R)
                     items_detailed = sorted(
                         items_detailed,
                         key=lambda x: x.modified_at or "",

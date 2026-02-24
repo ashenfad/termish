@@ -49,9 +49,7 @@ class TestSedSubstitution:
 
     def test_replacement_with_backreference(self, fs):
         execute_script(to_script("echo 'hello world' > f.txt"), fs)
-        out = execute_script(
-            to_script("sed 's/(hello) (world)/\\2 \\1/' f.txt"), fs
-        )
+        out = execute_script(to_script("sed 's/(hello) (world)/\\2 \\1/' f.txt"), fs)
         assert out == "world hello\n"
 
     def test_multiline_substitution(self, fs):
@@ -233,9 +231,7 @@ class TestSedMultipleExpressions:
     def test_semicolon_in_replacement_with_following_command(self, fs):
         """Semicolon in replacement followed by a real semicolon-separated cmd."""
         fs.write("/f.txt", b"a\nb\n")
-        out = execute_script(
-            to_script("sed 's/a/x;y/;2d' f.txt"), fs
-        )
+        out = execute_script(to_script("sed 's/a/x;y/;2d' f.txt"), fs)
         assert out == "x;y\n"
 
 
@@ -312,7 +308,10 @@ class TestSedErrors:
         fs.write("/f.txt", b"test\n")
         with pytest.raises(TerminalError) as exc:
             execute_script(to_script("sed 's/[invalid/new/' f.txt"), fs)
-        assert "invalid regex" in str(exc.value).lower() or "error" in str(exc.value).lower()
+        assert (
+            "invalid regex" in str(exc.value).lower()
+            or "error" in str(exc.value).lower()
+        )
 
     def test_unterminated_substitution(self, fs):
         fs.write("/f.txt", b"test\n")

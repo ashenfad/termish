@@ -4,7 +4,7 @@ import pytest
 
 monkeyfs = pytest.importorskip("monkeyfs")
 
-from termish.fs import FileSystem
+from termish.fs import FileSystem  # noqa: E402
 
 
 class TestVirtualFSProtocol:

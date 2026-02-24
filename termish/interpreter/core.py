@@ -106,9 +106,7 @@ def execute_script(script: Script, fs: FileSystem) -> str:
             last_error = TerminalError(f"Unexpected error: {e}")
 
     if last_error is not None:
-        raise TerminalError(
-            last_error.message, partial_output=final_output.getvalue()
-        )
+        raise TerminalError(last_error.message, partial_output=final_output.getvalue())
 
     return final_output.getvalue()
 

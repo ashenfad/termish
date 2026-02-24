@@ -464,9 +464,7 @@ class TestTr:
         assert out == "he wrd\n"
 
     def test_squeeze(self, fs):
-        out = execute_script(
-            to_script("echo 'aabbcc' | tr -s 'abc'"), fs
-        )
+        out = execute_script(to_script("echo 'aabbcc' | tr -s 'abc'"), fs)
         assert out == "abc\n"
 
     def test_character_range(self, fs):
@@ -474,39 +472,27 @@ class TestTr:
         assert out == "ABC\n"
 
     def test_upper_to_lower(self, fs):
-        out = execute_script(
-            to_script("echo 'HELLO' | tr '[:upper:]' '[:lower:]'"), fs
-        )
+        out = execute_script(to_script("echo 'HELLO' | tr '[:upper:]' '[:lower:]'"), fs)
         assert out == "hello\n"
 
     def test_lower_to_upper(self, fs):
-        out = execute_script(
-            to_script("echo 'hello' | tr '[:lower:]' '[:upper:]'"), fs
-        )
+        out = execute_script(to_script("echo 'hello' | tr '[:lower:]' '[:upper:]'"), fs)
         assert out == "HELLO\n"
 
     def test_delete_digits(self, fs):
-        out = execute_script(
-            to_script("echo 'abc123def' | tr -d '[:digit:]'"), fs
-        )
+        out = execute_script(to_script("echo 'abc123def' | tr -d '[:digit:]'"), fs)
         assert out == "abcdef\n"
 
     def test_squeeze_spaces(self, fs):
-        out = execute_script(
-            to_script("echo 'hello    world' | tr -s '[:space:]'"), fs
-        )
+        out = execute_script(to_script("echo 'hello    world' | tr -s '[:space:]'"), fs)
         assert out.strip() == "hello world"
 
     def test_translate_with_squeeze(self, fs):
-        out = execute_script(
-            to_script("echo 'aabbcc' | tr -s 'abc' 'xyz'"), fs
-        )
+        out = execute_script(to_script("echo 'aabbcc' | tr -s 'abc' 'xyz'"), fs)
         assert out == "xyz\n"
 
     def test_complement_delete(self, fs):
-        out = execute_script(
-            to_script("echo 'abc123' | tr -cd '[:digit:]'"), fs
-        )
+        out = execute_script(to_script("echo 'abc123' | tr -cd '[:digit:]'"), fs)
         assert out.rstrip("\n") == "123"
 
 
