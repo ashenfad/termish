@@ -36,12 +36,10 @@ dev = [
     "ruff",
     "pre-commit",
     "pytest",
-    "pytest-timeout",
     "monkeyfs",
 ]
 test = [
     "pytest",
-    "pytest-timeout",
     "monkeyfs",
 ]
 
