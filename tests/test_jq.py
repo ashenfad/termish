@@ -268,6 +268,11 @@ class TestFunctions:
         output = execute_script(to_script('jq "last" data.json'), fs)
         assert output.strip() == "3"
 
+    def test_last_expr_null(self, fs):
+        fs.write("data.json", b"[1, null]")
+        output = execute_script(to_script('jq "last(.[])" data.json'), fs)
+        assert output.strip() == "null"
+
     def test_add(self, fs):
         fs.write("data.json", b"[1, 2, 3]")
         output = execute_script(to_script('jq "add" data.json'), fs)

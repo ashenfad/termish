@@ -26,6 +26,8 @@ from .ast import (
     Slice,
 )
 
+_MISSING = object()
+
 
 class JqError(Exception):
     """Error during jq evaluation."""
@@ -484,10 +486,10 @@ def _call_function(name: str, args: list[Expr], data: Any) -> Iterator[Any]:
                 yield data[-1]
             elif args:
                 # last(expr) - last result of expr
-                result = None
+                result = _MISSING
                 for val in evaluate(args[0], data):
                     result = val
-                if result is not None:
+                if result is not _MISSING:
                     yield result
 
         case "nth":
