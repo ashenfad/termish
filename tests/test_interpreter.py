@@ -358,6 +358,16 @@ class TestDiffIgnoreCase:
         out_same = execute_script(to_script("diff -i a.txt b.txt"), fs)
         assert out_same == ""
 
+    def test_diff_ignore_case_shows_original_lines(self, fs):
+        fs.write("/a.txt", b"Hello\nSAME\n")
+        fs.write("/b.txt", b"World\nSAME\n")
+        out = execute_script(to_script("diff -i a.txt b.txt"), fs)
+        # Output should contain original-cased lines, not lowercased
+        assert "Hello" in out
+        assert "World" in out
+        assert "hello" not in out
+        assert "world" not in out
+
 
 # ---------------------------------------------------------------------------
 # basename / dirname

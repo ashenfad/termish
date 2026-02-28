@@ -101,6 +101,17 @@ class TestDirectoryOps:
         assert fs.isdir("/a/b")
         assert fs.isdir("/a/b/c")
 
+    def test_makedirs_exist_ok_false(self):
+        fs = MemoryFS()
+        fs.makedirs("/a/b/c")
+        with pytest.raises(FileExistsError):
+            fs.makedirs("/a/b/c", exist_ok=False)
+
+    def test_makedirs_exist_ok_true(self):
+        fs = MemoryFS()
+        fs.makedirs("/a/b/c")
+        fs.makedirs("/a/b/c", exist_ok=True)  # Should not raise
+
     def test_rmdir_empty(self):
         fs = MemoryFS()
         fs.mkdir("/empty")
