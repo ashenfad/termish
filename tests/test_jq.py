@@ -290,6 +290,11 @@ class TestFunctions:
         output = execute_script(to_script("jq 'join(\"-\")' data.json"), fs)
         assert output.strip() == '"a-b-c"'
 
+    def test_join_skips_null(self, fs):
+        fs.write("data.json", b'["a", null, "c"]')
+        output = execute_script(to_script("jq 'join(\"-\")' data.json"), fs)
+        assert output.strip() == '"a-c"'
+
     def test_split(self, fs):
         fs.write("data.json", b'"a-b-c"')
         output = execute_script(to_script("jq 'split(\"-\")' data.json"), fs)
