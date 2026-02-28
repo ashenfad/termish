@@ -16,6 +16,7 @@ from .commands import diff as diff_cmd
 from .commands import io as io_cmds
 from .commands import jq as jq_cmd
 from .commands import sed as sed_cmd
+from .commands._util import resolve_path
 
 # Static mapping of built-in commands
 BUILTINS: dict[str, CommandFunc] = {
@@ -128,7 +129,7 @@ def _execute_pipeline(pipeline: Pipeline, fs: FileSystem, stdout: TextIO):
         # Handle Redirects (Input)
         input_redirect = next((r for r in cmd_node.redirects if r.type == "<"), None)
         if input_redirect:
-            path = _resolve_path(input_redirect.target, fs)
+            path = resolve_path(input_redirect.target, fs)
             try:
                 content_bytes = fs.read(path)
                 content_str = content_bytes.decode("utf-8", errors="replace")
@@ -158,7 +159,7 @@ def _execute_pipeline(pipeline: Pipeline, fs: FileSystem, stdout: TextIO):
 
         if output_redirects:
             for r in output_redirects:
-                path = _resolve_path(r.target, fs)
+                path = resolve_path(r.target, fs)
                 try:
                     _write_to_file(path, output_content, r.type == ">>", fs)
                 except Exception as e:
@@ -190,17 +191,6 @@ def _expand_args(args: list[str], fs: FileSystem) -> list[str]:
             expanded.append(unmask_and_unquote(masked, mask_map))
 
     return expanded
-
-
-def _resolve_path(path: str, fs: FileSystem) -> str:
-    """Resolve path against CWD."""
-    if path.startswith("/"):
-        return path
-
-    cwd = fs.getcwd()
-    if cwd == "/":
-        return f"/{path}"
-    return f"{cwd}/{path}"
 
 
 def _write_to_file(path: str, content: str, append: bool, fs: FileSystem):

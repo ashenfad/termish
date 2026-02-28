@@ -9,16 +9,7 @@ from termish.errors import TerminalError
 from termish.fs import FileSystem
 
 from ._argparse import CommandArgParser
-
-
-def _resolve_path(path: str, fs: FileSystem) -> str:
-    """Resolve path against CWD."""
-    if path.startswith("/"):
-        return path
-    cwd = fs.getcwd()
-    if cwd == "/":
-        return f"/{path}"
-    return f"{cwd}/{path}"
+from ._util import resolve_path
 
 
 def pwd(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
@@ -242,8 +233,8 @@ def cp(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
                     target_path = dst
 
                 # Check for copying into self
-                src_abs = _resolve_path(src, fs)
-                dst_abs = _resolve_path(target_path, fs)
+                src_abs = resolve_path(src, fs)
+                dst_abs = resolve_path(target_path, fs)
                 if dst_abs.startswith(src_abs.rstrip("/") + "/"):
                     raise TerminalError(f"cp: cannot copy '{src}' into itself")
 
@@ -315,7 +306,7 @@ def rm(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
                     )
 
                 # Prevent removing root
-                resolved = _resolve_path(path, fs)
+                resolved = resolve_path(path, fs)
                 if resolved == "/" or resolved == "":
                     raise TerminalError("rm: cannot remove root directory")
 
