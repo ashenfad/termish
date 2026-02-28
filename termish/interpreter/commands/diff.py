@@ -70,23 +70,33 @@ def diff(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
             stdout.write(f"Files {parsed.file1} and {parsed.file2} differ\n")
         return
 
-    # Generate diff (use preprocessed lines when applicable)
+    # Generate diff: compare preprocessed lines but display originals.
+    # When preprocessing is active, generate diff output from preprocessed
+    # lines (to get correct hunks), then substitute original lines.
     if parsed.context:
-        # Context format
-        result = difflib.context_diff(
-            cmp1,
-            cmp2,
-            fromfile=parsed.file1,
-            tofile=parsed.file2,
+        diff_lines = list(
+            difflib.context_diff(cmp1, cmp2, fromfile=parsed.file1, tofile=parsed.file2)
         )
     else:
-        # Unified format (default)
-        result = difflib.unified_diff(
-            cmp1,
-            cmp2,
-            fromfile=parsed.file1,
-            tofile=parsed.file2,
+        diff_lines = list(
+            difflib.unified_diff(cmp1, cmp2, fromfile=parsed.file1, tofile=parsed.file2)
         )
 
-    for line in result:
+    if cmp1 is not file1_lines and diff_lines:
+        # Build lookup from preprocessed line -> original line
+        cmp1_map = dict(zip(cmp1, file1_lines))
+        cmp2_map = dict(zip(cmp2, file2_lines))
+        cmp_map = {**cmp1_map, **cmp2_map}
+        for i, line in enumerate(diff_lines):
+            if line.startswith(("---", "+++", "@@", "***", "--- ", "+++ ")):
+                continue
+            prefix = ""
+            content = line
+            if line and line[0] in ("-", "+", "!", " "):
+                prefix = line[0]
+                content = line[1:]
+            original = cmp_map.get(content, content)
+            diff_lines[i] = prefix + original
+
+    for line in diff_lines:
         stdout.write(line)
