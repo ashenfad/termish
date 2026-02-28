@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **diff -i/-B/-w**: Shows original lines in output instead of preprocessed ones
 - **sed assert**: Replaced bare assert with proper TerminalError
 - **Trailing pipes**: Parser rejects trailing pipes instead of silently ignoring them
+- **diff -i duplicate lines**: Fixed incorrect original line mapping when multiple lines collapse to the same preprocessed value
+- **resolve_path**: Normalize paths with posixpath.normpath to handle `..` components
 
 ### Changed
 - **_resolve_path**: Deduplicated into shared resolve_path helper in commands/_util.py

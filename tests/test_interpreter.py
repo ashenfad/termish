@@ -368,6 +368,17 @@ class TestDiffIgnoreCase:
         assert "hello" not in out
         assert "world" not in out
 
+    def test_diff_ignore_case_duplicate_preprocessed_lines(self, fs):
+        """Lines that differ in case but match after -i should map back correctly."""
+        fs.write("/a.txt", b"Alpha\nalpha\nBeta\n")
+        fs.write("/b.txt", b"Alpha\nalpha\nGamma\n")
+        out = execute_script(to_script("diff -i a.txt b.txt"), fs)
+        # Should show original-cased lines, not lowercased
+        assert "Beta" in out
+        assert "Gamma" in out
+        assert "beta" not in out
+        assert "gamma" not in out
+
 
 # ---------------------------------------------------------------------------
 # basename / dirname

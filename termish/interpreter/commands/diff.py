@@ -83,10 +83,16 @@ def diff(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
         )
 
     if cmp1 is not file1_lines and diff_lines:
-        # Build lookup from preprocessed line -> original line
-        cmp1_map = dict(zip(cmp1, file1_lines))
-        cmp2_map = dict(zip(cmp2, file2_lines))
-        cmp_map = {**cmp1_map, **cmp2_map}
+        # Build mapping that handles duplicate preprocessed lines
+        # (e.g. "a" and "A" both becoming "a" with -i) by keeping
+        # all originals in order and popping the first match.
+        from collections import defaultdict
+
+        cmp_map: dict[str, list[str]] = defaultdict(list)
+        for prep, orig in zip(cmp1, file1_lines):
+            cmp_map[prep].append(orig)
+        for prep, orig in zip(cmp2, file2_lines):
+            cmp_map[prep].append(orig)
         for i, line in enumerate(diff_lines):
             if line.startswith(("---", "+++", "@@", "***", "--- ", "+++ ")):
                 continue
@@ -95,7 +101,8 @@ def diff(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
             if line and line[0] in ("-", "+", "!", " "):
                 prefix = line[0]
                 content = line[1:]
-            original = cmp_map.get(content, content)
+            originals = cmp_map.get(content)
+            original = originals.pop(0) if originals else content
             diff_lines[i] = prefix + original
 
     for line in diff_lines:
