@@ -122,6 +122,17 @@ def _parse_tokens(tokens: list[str], mask_map: dict[str, str]) -> Script:
                 flush_command()
                 if not current_pipeline_cmds and not cmd_name:
                     raise ParseError("Unexpected pipe '|' before command")
+                # Check for trailing pipe
+                try:
+                    next_token = next(it)
+                except StopIteration:
+                    raise ParseError("Unexpected end of input after '|'")
+                # Push back by handling the next token inline
+                if next_token in ("|", ";", "\n", "&&", "||"):
+                    raise ParseError(f"Expected command after '|', got '{next_token}'")
+                # It's a regular token — start the next command
+                next_token = unmask(next_token)
+                cmd_name = next_token
                 continue
 
             elif token in (">", ">>", "<"):

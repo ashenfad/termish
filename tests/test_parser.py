@@ -165,6 +165,12 @@ def test_errors():
     with pytest.raises(ParseError, match="Unexpected pipe"):
         to_script("| ls")
 
+    with pytest.raises(ParseError, match="Unexpected end of input after"):
+        to_script("echo hello |")
+
+    with pytest.raises(ParseError, match="Expected command after"):
+        to_script("echo hello | |")
+
 
 # --- Complex Scripts Tests ---
 
