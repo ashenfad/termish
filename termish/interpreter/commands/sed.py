@@ -363,7 +363,8 @@ def _process_content(content: str, commands: list[_SedCommand], suppress: bool) 
 
             if cmd.command == "s":
                 count = 0 if "g" in cmd.sub_flags else 1
-                assert cmd.pattern is not None
+                if cmd.pattern is None:
+                    raise TerminalError("sed: missing pattern for 's' command")
                 new_content, num_subs = cmd.pattern.subn(
                     cmd.replacement, line_content, count=count
                 )
