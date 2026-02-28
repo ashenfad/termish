@@ -569,7 +569,7 @@ def _call_function(name: str, args: list[Expr], data: Any) -> Iterator[Any]:
                 raise JqTypeError("join requires array input")
             sep_vals = list(evaluate(args[0], data))
             sep = str(sep_vals[0]) if sep_vals else ""
-            yield sep.join(str(x) for x in data)
+            yield sep.join(str(x) for x in data if x is not None)
 
         case "split":
             if len(args) != 1:
