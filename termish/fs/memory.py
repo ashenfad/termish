@@ -137,6 +137,8 @@ class MemoryFS:
 
     def makedirs(self, path: str, exist_ok: bool = True) -> None:
         path = self._resolve(path)
+        if not exist_ok and path in self._dirs:
+            raise FileExistsError(f"Directory exists: '{path}'")
         parts = path.strip("/").split("/")
         current = ""
         for part in parts:
@@ -144,7 +146,6 @@ class MemoryFS:
             if current not in self._dirs:
                 self._dirs.add(current)
                 self._touch_ts(current)
-            # exist_ok is always True for intermediate dirs
 
     def rmdir(self, path: str) -> None:
         path = self._resolve(path)
