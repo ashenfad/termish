@@ -342,3 +342,32 @@ class TestFindDelete:
         execute_script(to_script("find / -type d -name 'empty' -delete"), fs)
         assert not fs.exists("/empty")
         assert fs.exists("/keep.txt")
+
+
+# ---------------------------------------------------------------------------
+# find -empty
+# ---------------------------------------------------------------------------
+
+
+class TestFindEmpty:
+    def test_empty_file(self, fs):
+        fs.write("/empty.txt", b"")
+        fs.write("/notempty.txt", b"data")
+        out = execute_script(to_script("find / -empty -type f"), fs)
+        assert "empty.txt" in out
+        assert "notempty.txt" not in out
+
+    def test_empty_dir(self, fs):
+        fs.makedirs("/emptydir")
+        fs.makedirs("/fulldir")
+        fs.write("/fulldir/f.txt", b"")
+        out = execute_script(to_script("find / -empty -type d"), fs)
+        assert "emptydir" in out
+        assert "fulldir" not in out
+
+    def test_empty_combined_with_delete(self, fs):
+        fs.write("/a.tmp", b"")
+        fs.write("/b.txt", b"data")
+        execute_script(to_script("find / -empty -type f -delete"), fs)
+        assert not fs.exists("/a.tmp")
+        assert fs.exists("/b.txt")
