@@ -38,11 +38,13 @@ class _SedCommand:
     """A single sed command with its address range."""
 
     address: _AddressRange = field(default_factory=_AddressRange)
-    command: str = ""  # 's', 'p', 'd'
+    command: str = ""  # 's', 'p', 'd', 'a', 'i', 'c', 'q'
     # For substitution:
     pattern: re.Pattern[str] | None = None
     replacement: str = ""
     sub_flags: str = ""
+    # For a/i/c (text to insert/append/change):
+    text: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -205,8 +207,19 @@ def _parse_single_command(text: str) -> _SedCommand:
             replacement=replacement,
             sub_flags=sub_flags,
         )
-    elif cmd_char in ("p", "d"):
+    elif cmd_char in ("p", "d", "q"):
         cmd = _SedCommand(address=addr_range, command=cmd_char)
+    elif cmd_char in ("a", "i", "c"):
+        # Text follows: a\text, a text, or a\ followed by text
+        rest = text[pos:]
+        if rest.startswith("\\"):
+            rest = rest[1:]
+        elif rest.startswith(" "):
+            rest = rest.lstrip(" ")
+        # Interpret \n escape sequences in the text
+        rest = rest.replace("\\n", "\n")
+        cmd = _SedCommand(address=addr_range, command=cmd_char, text=rest)
+        pos = len(text)
     else:
         raise TerminalError(f"sed: unknown command: '{cmd_char}'")
 
@@ -225,9 +238,25 @@ def _split_script(script: str) -> list[str]:
     # For s commands we need to skip past all 3 delimiters (s/pat/repl/flags)
     delim_char = ""
     delim_remaining = 0  # number of closing delimiters still expected
+    # For a/i/c commands, text runs to end-of-line (not split on ;)
+    in_text_cmd = False
 
     while i < len(script):
         ch = script[i]
+
+        # a/i/c text: consume everything until newline
+        if in_text_cmd:
+            if ch == "\n":
+                part = "".join(current).strip()
+                if part:
+                    parts.append(part)
+                current = []
+                in_text_cmd = False
+                i += 1
+                continue
+            current.append(ch)
+            i += 1
+            continue
 
         if delim_remaining > 0:
             current.append(ch)
@@ -249,6 +278,13 @@ def _split_script(script: str) -> list[str]:
                 delim_remaining = 2  # expect 2 more closing delimiters
                 current.append(script[i])
                 i += 1
+            continue
+
+        if ch in ("a", "i", "c") and (not current or current[-1] in (",", " ")):
+            # a/i/c command — rest until newline is the text argument
+            current.append(ch)
+            i += 1
+            in_text_cmd = True
             continue
 
         if ch in (";", "\n"):
@@ -341,11 +377,13 @@ def _process_content(content: str, commands: list[_SedCommand], suppress: bool) 
     total_lines = len(lines)
     range_active: list[bool] = [False] * len(commands)
     output_lines: list[str] = []
+    quit_after = False
 
     for line_num, line in enumerate(lines, start=1):
         line_content = line.rstrip("\n")
         should_print = not suppress
         deleted = False
+        append_queue: list[str] = []
 
         for cmd_idx, cmd in enumerate(commands):
             if deleted:
@@ -376,9 +414,28 @@ def _process_content(content: str, commands: list[_SedCommand], suppress: bool) 
             elif cmd.command == "d":
                 deleted = True
                 should_print = False
+            elif cmd.command == "a":
+                append_queue.append(cmd.text + "\n")
+            elif cmd.command == "i":
+                output_lines.append(cmd.text + "\n")
+            elif cmd.command == "c":
+                output_lines.append(cmd.text + "\n")
+                deleted = True
+                should_print = False
+            elif cmd.command == "q":
+                if should_print:
+                    output_lines.append(line_content + "\n")
+                quit_after = True
+                should_print = False
+                break
 
         if should_print and not deleted:
             output_lines.append(line_content + "\n")
+
+        output_lines.extend(append_queue)
+
+        if quit_after:
+            break
 
     result = "".join(output_lines)
 
