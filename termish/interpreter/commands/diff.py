@@ -3,6 +3,7 @@ Diff command for the terminal interpreter.
 """
 
 import difflib
+import re
 from typing import TextIO
 
 from termish.errors import TerminalError
@@ -51,11 +52,24 @@ def _diff_pair(
             result = [line for line in result if line.strip()]
         if parsed.ignore_all_space:
             result = [line.replace(" ", "").replace("\t", "") for line in result]
+        elif parsed.ignore_space_change:
+            result = [
+                re.sub(r"[ \t]+", " ", line).rstrip() + "\n"
+                if line.endswith("\n")
+                else re.sub(r"[ \t]+", " ", line).rstrip()
+                for line in result
+            ]
         if parsed.ignore_case:
             result = [line.lower() for line in result]
         return result
 
-    if parsed.ignore_blank_lines or parsed.ignore_all_space or parsed.ignore_case:
+    needs_preprocess = (
+        parsed.ignore_blank_lines
+        or parsed.ignore_all_space
+        or parsed.ignore_space_change
+        or parsed.ignore_case
+    )
+    if needs_preprocess:
         cmp1 = preprocess(file1_lines)
         cmp2 = preprocess(file2_lines)
     else:
@@ -132,6 +146,7 @@ def diff(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
     parser.add_argument("-q", "--brief", action="store_true")
     parser.add_argument("-B", "--ignore-blank-lines", action="store_true")
     parser.add_argument("-w", "--ignore-all-space", action="store_true")
+    parser.add_argument("-b", "--ignore-space-change", action="store_true")
     parser.add_argument("-i", "--ignore-case", action="store_true")
     parser.add_argument("-r", "--recursive", action="store_true")
     parser.add_argument("file1", nargs="?")
