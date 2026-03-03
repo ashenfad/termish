@@ -18,6 +18,7 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
     parser.add_argument("-n", "--line-number", action="store_true")
     parser.add_argument("-r", "-R", "--recursive", action="store_true")
     parser.add_argument("-l", "--files-with-matches", action="store_true")
+    parser.add_argument("-L", "--files-without-match", action="store_true")
     parser.add_argument("-v", "--invert-match", action="store_true")
     parser.add_argument("-F", "--fixed-strings", action="store_true")
     parser.add_argument("-E", "--extended-regexp", action="store_true")
@@ -32,6 +33,8 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
     parser.add_argument("--include", type=str, default=None)
     parser.add_argument("--exclude", type=str, default=None)
     parser.add_argument("--exclude-dir", type=str, default=None)
+    parser.add_argument("-H", "--with-filename", action="store_true")
+    parser.add_argument("-h", "--no-filename", action="store_true", dest="no_filename")
     parser.add_argument("-e", action="append", dest="patterns")
     parser.add_argument("positional", nargs="*")
 
@@ -81,14 +84,15 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
     matches_total = 0
     has_context = before_context > 0 or after_context > 0
     quiet = parsed.quiet
+    real_stdout = stdout
 
     max_count = parsed.max_count
     if quiet and not max_count:
         max_count = 1  # -q exits after first match
-    if quiet:
-        stdout = io.StringIO()  # suppress all output
+    if quiet or parsed.files_without_match:
+        stdout = io.StringIO()  # suppress line output
 
-    def process_content(content: str, label: str | None) -> None:
+    def process_content(content: str, label: str | None) -> int:
         nonlocal matches_total
         lines = content.splitlines()
         file_matches = 0
@@ -106,7 +110,7 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
             matches_total += match_count
             prefix = f"{label}:" if label else ""
             stdout.write(f"{prefix}{match_count}\n")
-            return
+            return match_count
 
         # Only-matching mode
         if parsed.only_matching:
@@ -117,7 +121,7 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
                     if parsed.files_with_matches:
                         if label:
                             stdout.write(f"{label}\n")
-                        return
+                        return file_matches
                     prefix = ""
                     if label:
                         prefix += f"{label}:"
@@ -125,10 +129,10 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
                         prefix += f"{i + 1}:"
                     stdout.write(f"{prefix}{m.group()}\n")
                     if max_count and file_matches >= max_count:
-                        return
+                        return file_matches
                 if max_count and file_matches >= max_count:
-                    return
-            return
+                    return file_matches
+            return file_matches
 
         if has_context:
             # Context mode: need to track which lines to print
@@ -147,7 +151,7 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
                     if parsed.files_with_matches:
                         if label:
                             stdout.write(f"{label}\n")
-                        return
+                        return len(matching_lines)
                     if max_count and len(matching_lines) >= max_count:
                         break
 
@@ -199,7 +203,7 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
                     if parsed.files_with_matches:
                         if label:
                             stdout.write(f"{label}\n")
-                        return  # Stop processing this file
+                        return file_matches
 
                     prefix = ""
                     if label:
@@ -213,7 +217,8 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
                         stdout.write(f"{line}\n")
 
                     if max_count and file_matches >= max_count:
-                        return
+                        return file_matches
+        return file_matches
 
     if not parsed.files and not parsed.recursive:
         content = stdin.read()
@@ -277,13 +282,23 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
             content_bytes = fs.read(filepath)
             content = content_bytes.decode("utf-8", errors="replace")
 
-            # -l always needs the filepath as label
-            label = (
-                filepath
-                if (multiple_files or parsed.recursive or parsed.files_with_matches)
-                else None
-            )
-            process_content(content, label)
+            # Determine label (filename prefix) for output lines
+            if parsed.no_filename:
+                label = None
+            elif parsed.with_filename:
+                label = filepath
+            elif (
+                multiple_files
+                or parsed.recursive
+                or parsed.files_with_matches
+                or parsed.files_without_match
+            ):
+                label = filepath
+            else:
+                label = None
+            file_matches = process_content(content, label)
+            if parsed.files_without_match and file_matches == 0:
+                real_stdout.write(f"{filepath}\n")
 
         except FileNotFoundError:
             raise TerminalError(f"grep: {filepath}: No such file or directory")
