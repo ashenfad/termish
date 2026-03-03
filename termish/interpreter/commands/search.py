@@ -240,20 +240,212 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
             raise TerminalError(f"grep: {filepath}: {e}")
 
 
+# ---------------------------------------------------------------------------
+# find — predicate expression tree
+# ---------------------------------------------------------------------------
+
+
+class _FindPred:
+    """Base class for find predicates."""
+
+    __slots__ = ()
+
+    def matches(self, item: "FileInfo") -> bool:  # noqa: F821
+        raise NotImplementedError
+
+
+class _NamePred(_FindPred):
+    __slots__ = ("pattern",)
+
+    def __init__(self, pattern: str) -> None:
+        self.pattern = pattern
+
+    def matches(self, item: "FileInfo") -> bool:  # noqa: F821
+        return fnmatch.fnmatch(item.name, self.pattern)
+
+
+class _TypePred(_FindPred):
+    __slots__ = ("kind",)
+
+    def __init__(self, kind: str) -> None:
+        self.kind = kind
+
+    def matches(self, item: "FileInfo") -> bool:  # noqa: F821
+        if self.kind == "f":
+            return not item.is_dir
+        return item.is_dir
+
+
+class _AndPred(_FindPred):
+    __slots__ = ("left", "right")
+
+    def __init__(self, left: _FindPred, right: _FindPred) -> None:
+        self.left = left
+        self.right = right
+
+    def matches(self, item: "FileInfo") -> bool:  # noqa: F821
+        return self.left.matches(item) and self.right.matches(item)
+
+
+class _OrPred(_FindPred):
+    __slots__ = ("left", "right")
+
+    def __init__(self, left: _FindPred, right: _FindPred) -> None:
+        self.left = left
+        self.right = right
+
+    def matches(self, item: "FileInfo") -> bool:  # noqa: F821
+        return self.left.matches(item) or self.right.matches(item)
+
+
+class _NotPred(_FindPred):
+    __slots__ = ("child",)
+
+    def __init__(self, child: _FindPred) -> None:
+        self.child = child
+
+    def matches(self, item: "FileInfo") -> bool:  # noqa: F821
+        return not self.child.matches(item)
+
+
+class _TruePred(_FindPred):
+    __slots__ = ()
+
+    def matches(self, item: "FileInfo") -> bool:  # noqa: F821
+        return True
+
+
+def _parse_find_predicates(tokens: list[str]) -> _FindPred:
+    """Parse find predicate tokens into an expression tree.
+
+    Supports: -name, -type, -not / !, -and / -a, -or / -o, ( )
+    Implicit AND between adjacent predicates (like real find).
+    Precedence: NOT > AND > OR.
+    """
+    pos = 0
+
+    def _parse_or() -> _FindPred:
+        left = _parse_and()
+        nonlocal pos
+        while pos < len(tokens) and tokens[pos] in ("-o", "-or"):
+            pos += 1
+            right = _parse_and()
+            left = _OrPred(left, right)
+        return left
+
+    def _parse_and() -> _FindPred:
+        left = _parse_unary()
+        nonlocal pos
+        while pos < len(tokens):
+            tok = tokens[pos]
+            # Explicit AND
+            if tok in ("-a", "-and"):
+                pos += 1
+                right = _parse_unary()
+                left = _AndPred(left, right)
+            # Implicit AND: next token starts a new predicate (not an operator)
+            elif tok not in ("-o", "-or", ")"):
+                right = _parse_unary()
+                left = _AndPred(left, right)
+            else:
+                break
+        return left
+
+    def _parse_unary() -> _FindPred:
+        nonlocal pos
+        if pos >= len(tokens):
+            raise TerminalError("find: expected expression")
+        tok = tokens[pos]
+        if tok in ("-not", "!"):
+            pos += 1
+            child = _parse_unary()
+            return _NotPred(child)
+        return _parse_primary()
+
+    def _parse_primary() -> _FindPred:
+        nonlocal pos
+        if pos >= len(tokens):
+            raise TerminalError("find: expected expression")
+        tok = tokens[pos]
+
+        if tok == "(":
+            pos += 1
+            node = _parse_or()
+            if pos >= len(tokens) or tokens[pos] != ")":
+                raise TerminalError("find: missing closing ')'")
+            pos += 1
+            return node
+
+        if tok == "-name":
+            pos += 1
+            if pos >= len(tokens):
+                raise TerminalError("find: -name requires a pattern")
+            pattern = tokens[pos]
+            pos += 1
+            return _NamePred(pattern)
+
+        if tok == "-type":
+            pos += 1
+            if pos >= len(tokens):
+                raise TerminalError("find: -type requires an argument")
+            kind = tokens[pos]
+            if kind not in ("f", "d"):
+                raise TerminalError(f"find: unknown type '{kind}' (use 'f' or 'd')")
+            pos += 1
+            return _TypePred(kind)
+
+        raise TerminalError(f"find: unknown predicate: {tok}")
+
+    if not tokens:
+        return _TruePred()
+
+    result = _parse_or()
+    if pos < len(tokens):
+        raise TerminalError(f"find: unexpected token: {tokens[pos]}")
+    return result
+
+
 def find(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
     """Search for files in a directory hierarchy."""
-    parser = CommandArgParser(prog="find", add_help=False)
-    parser.add_argument("path", nargs="?", default=".")
-    parser.add_argument("-name")
-    parser.add_argument("-type", choices=["f", "d"])
-    parser.add_argument("-maxdepth", type=int, default=None)
-    parser.add_argument("-mindepth", type=int, default=None)
+    # Separate path, global options (-maxdepth, -mindepth), and predicates.
+    # We can't use argparse because predicate tokens like -o look like flags.
+    root_path = "."
+    maxdepth = None
+    mindepth = None
+    predicate_tokens: list[str] = []
 
-    parsed, unknown = parser.parse_known_args(args)
-    if unknown:
-        raise TerminalError(f"find: unknown option: {unknown[0]}")
+    i = 0
+    # Leading positional arg (path) — anything not starting with - or (
+    if i < len(args) and not args[i].startswith("-") and args[i] not in ("(", "!"):
+        root_path = args[i]
+        i += 1
 
-    root_path = parsed.path
+    # Consume global options and collect predicate tokens
+    while i < len(args):
+        if args[i] == "-maxdepth":
+            i += 1
+            if i >= len(args):
+                raise TerminalError("find: -maxdepth requires an argument")
+            try:
+                maxdepth = int(args[i])
+            except ValueError:
+                raise TerminalError(f"find: invalid argument to -maxdepth: {args[i]}")
+            i += 1
+        elif args[i] == "-mindepth":
+            i += 1
+            if i >= len(args):
+                raise TerminalError("find: -mindepth requires an argument")
+            try:
+                mindepth = int(args[i])
+            except ValueError:
+                raise TerminalError(f"find: invalid argument to -mindepth: {args[i]}")
+            i += 1
+        else:
+            predicate_tokens.append(args[i])
+            i += 1
+
+    predicate = _parse_find_predicates(predicate_tokens)
+
     try:
         all_items = fs.list_detailed(root_path, recursive=True)
 
@@ -265,21 +457,17 @@ def find(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
             relative = item.path[len(root_stripped) :].lstrip("/")
             depth = len(relative.split("/")) if relative else 0
 
-            if parsed.maxdepth is not None and depth > parsed.maxdepth:
+            if maxdepth is not None and depth > maxdepth:
                 continue
-            if parsed.mindepth is not None and depth < parsed.mindepth:
-                continue
-
-            if parsed.type == "f" and item.is_dir:
-                continue
-            if parsed.type == "d" and not item.is_dir:
+            if mindepth is not None and depth < mindepth:
                 continue
 
-            if parsed.name:
-                if not fnmatch.fnmatch(item.name, parsed.name):
-                    continue
+            if not predicate.matches(item):
+                continue
 
             stdout.write(f"{item.path}\n")
 
+    except TerminalError:
+        raise
     except Exception as e:
         raise TerminalError(f"find: {e}")
