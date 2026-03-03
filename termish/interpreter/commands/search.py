@@ -1,9 +1,14 @@
 "Search commands (grep, find) for the terminal interpreter."
 
+from __future__ import annotations
+
 import fnmatch
 import io
 import re
-from typing import TextIO
+from typing import TYPE_CHECKING, TextIO
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 from termish.errors import TerminalError
 from termish.fs import FileSystem
@@ -464,23 +469,26 @@ class _ExecPred(_FindPred):
     When present, suppresses find's default path printing.
     """
 
-    __slots__ = ("cmd_tokens", "stdout")
+    __slots__ = ("cmd_tokens", "stdout", "executor")
 
-    def __init__(self, cmd_tokens: list[str], stdout: TextIO) -> None:
+    def __init__(
+        self,
+        cmd_tokens: list[str],
+        stdout: TextIO,
+        executor: Callable[[str, FileSystem], str],
+    ) -> None:
         self.cmd_tokens = cmd_tokens
         self.stdout = stdout
+        self.executor = executor
 
     def matches(self, item, fs=None) -> bool:
         if fs is None:
             return True
-        from termish.interpreter.core import execute_script
-        from termish.parser import to_script
-
         # Build command with {} replaced by the item path
         expanded = [tok.replace("{}", item.path) for tok in self.cmd_tokens]
         cmd_str = " ".join(expanded)
         try:
-            output = execute_script(to_script(cmd_str), fs)
+            output = self.executor(cmd_str, fs)
             if output:
                 self.stdout.write(output)
         except Exception:
@@ -539,7 +547,9 @@ def _has_action(pred: _FindPred) -> bool:
 
 
 def _parse_find_predicates(
-    tokens: list[str], stdout: TextIO | None = None
+    tokens: list[str],
+    stdout: TextIO | None = None,
+    executor: Callable[[str, FileSystem], str] | None = None,
 ) -> _FindPred:
     """Parse find predicate tokens into an expression tree.
 
@@ -671,7 +681,9 @@ def _parse_find_predicates(
             pos += 1  # skip ;
             if not cmd_tokens:
                 raise TerminalError("find: -exec requires a command")
-            return _ExecPred(cmd_tokens, stdout)
+            if executor is None:
+                raise TerminalError("find: -exec not available in this context")
+            return _ExecPred(cmd_tokens, stdout, executor)
 
         raise TerminalError(f"find: unknown predicate: {tok}")
 
@@ -723,7 +735,16 @@ def find(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
             predicate_tokens.append(args[i])
             i += 1
 
-    predicate = _parse_find_predicates(predicate_tokens, stdout=stdout)
+    # Build executor for -exec predicates (deferred import to avoid circular dep)
+    def _executor(cmd_str: str, executor_fs: FileSystem) -> str:
+        from termish.interpreter.core import execute_script
+        from termish.parser import to_script
+
+        return execute_script(to_script(cmd_str), executor_fs)
+
+    predicate = _parse_find_predicates(
+        predicate_tokens, stdout=stdout, executor=_executor
+    )
     has_action = _has_action(predicate)
 
     try:
