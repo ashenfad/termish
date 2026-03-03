@@ -104,6 +104,7 @@ def tar(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
     parser.add_argument("-C", "--directory", type=str, help="Change to directory")
+    parser.add_argument("--strip-components", type=int, default=0)
     parser.add_argument("files", nargs="*")
 
     parsed, unknown = parser.parse_known_args(args)
@@ -124,7 +125,15 @@ def tar(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
     if parsed.create:
         _tar_create(archive_path, parsed.files, parsed.gzip, parsed.verbose, stdout, fs)
     elif parsed.extract:
-        _tar_extract(archive_path, target_dir, parsed.gzip, parsed.verbose, stdout, fs)
+        _tar_extract(
+            archive_path,
+            target_dir,
+            parsed.gzip,
+            parsed.verbose,
+            parsed.strip_components,
+            stdout,
+            fs,
+        )
     elif parsed.list:
         _tar_list(archive_path, parsed.gzip, stdout, fs)
 
@@ -196,6 +205,7 @@ def _tar_extract(
     target_dir: str,
     use_gzip: bool,
     verbose: bool,
+    strip_components: int,
     stdout: TextIO,
     fs: FileSystem,
 ) -> None:
@@ -221,6 +231,14 @@ def _tar_extract(
                 safe_name = member.name.lstrip("/")
                 if not safe_name:
                     continue
+
+                # Strip path components
+                if strip_components > 0:
+                    parts = safe_name.split("/")
+                    parts = parts[strip_components:]
+                    if not parts or (len(parts) == 1 and parts[0] == ""):
+                        continue
+                    safe_name = "/".join(parts)
 
                 # Skip macOS AppleDouble resource fork files (._*)
                 basename = posixpath.basename(safe_name)

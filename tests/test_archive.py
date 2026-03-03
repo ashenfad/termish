@@ -385,6 +385,38 @@ class TestTarNoDash:
         assert "file.txt" in out
 
 
+class TestTarStripComponents:
+    def test_strip_one_component(self, fs):
+        """tar --strip-components=1 removes one path level."""
+        buffer = io.BytesIO()
+        with tarfile.open(fileobj=buffer, mode="w") as tf:
+            info = tarfile.TarInfo(name="prefix/file.txt")
+            data = b"content"
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+        fs.write("/archive.tar", buffer.getvalue())
+        execute_script(
+            to_script("tar -xf /archive.tar --strip-components=1 -C /out"), fs
+        )
+        assert fs.exists("/out/file.txt")
+        assert not fs.exists("/out/prefix")
+
+    def test_strip_skips_shallow_entries(self, fs):
+        """Entries with fewer components than strip count are skipped."""
+        buffer = io.BytesIO()
+        with tarfile.open(fileobj=buffer, mode="w") as tf:
+            info = tarfile.TarInfo(name="shallow.txt")
+            data = b"data"
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+        fs.write("/archive.tar", buffer.getvalue())
+        fs.makedirs("/out")
+        execute_script(
+            to_script("tar -xf /archive.tar --strip-components=1 -C /out"), fs
+        )
+        assert not fs.exists("/out/shallow.txt")
+
+
 class TestZip:
     """Tests for zip command."""
 
