@@ -7,6 +7,7 @@ Supports tar, gzip, gunzip, zip, and unzip operations.
 import gzip as gzip_module
 import io
 import posixpath
+import re
 import tarfile
 import zipfile
 from typing import TextIO
@@ -19,13 +20,23 @@ from ._argparse import CommandArgParser
 
 def gzip(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
     """Compress files using gzip."""
+    # Pre-process: extract compression level flags (-1 through -9)
+    compress_level = 9
+    filtered_args: list[str] = []
+    for arg in args:
+        if re.fullmatch(r"-[1-9]", arg):
+            compress_level = int(arg[1])
+        else:
+            filtered_args.append(arg)
+
     parser = CommandArgParser(prog="gzip", add_help=False)
     parser.add_argument("-d", "--decompress", action="store_true", help="Decompress")
     parser.add_argument("-k", "--keep", action="store_true", help="Keep original files")
     parser.add_argument("-f", "--force", action="store_true", help="Force overwrite")
+    parser.add_argument("-c", "--stdout", action="store_true", help="Write to stdout")
     parser.add_argument("files", nargs="*")
 
-    parsed, unknown = parser.parse_known_args(args)
+    parsed, unknown = parser.parse_known_args(filtered_args)
     if unknown:
         raise TerminalError(f"gzip: unknown arguments: {unknown}")
 
@@ -45,15 +56,17 @@ def gzip(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
                 except Exception as e:
                     raise TerminalError(f"gzip: {path}: {e}")
 
-                out_path = path[:-3]  # Remove .gz suffix
-                if fs.exists(out_path) and not parsed.force:
-                    raise TerminalError(
-                        f"gzip: {out_path} already exists; use -f to overwrite"
-                    )
-
-                fs.write(out_path, result)
-                if not parsed.keep:
-                    fs.remove(path)
+                if parsed.stdout:
+                    stdout.write(result.decode("utf-8", errors="replace"))
+                else:
+                    out_path = path[:-3]  # Remove .gz suffix
+                    if fs.exists(out_path) and not parsed.force:
+                        raise TerminalError(
+                            f"gzip: {out_path} already exists; use -f to overwrite"
+                        )
+                    fs.write(out_path, result)
+                    if not parsed.keep:
+                        fs.remove(path)
             else:
                 # Compress
                 if path.endswith(".gz"):
@@ -62,17 +75,25 @@ def gzip(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
                     )
 
                 content = fs.read(path)
-                result = gzip_module.compress(content)
+                result = gzip_module.compress(content, compresslevel=compress_level)
 
-                out_path = path + ".gz"
-                if fs.exists(out_path) and not parsed.force:
-                    raise TerminalError(
-                        f"gzip: {out_path} already exists; use -f to overwrite"
-                    )
-
-                fs.write(out_path, result)
-                if not parsed.keep:
-                    fs.remove(path)
+                if parsed.stdout:
+                    # -c with compress: write to file but keep original
+                    out_path = path + ".gz"
+                    if fs.exists(out_path) and not parsed.force:
+                        raise TerminalError(
+                            f"gzip: {out_path} already exists; use -f to overwrite"
+                        )
+                    fs.write(out_path, result)
+                else:
+                    out_path = path + ".gz"
+                    if fs.exists(out_path) and not parsed.force:
+                        raise TerminalError(
+                            f"gzip: {out_path} already exists; use -f to overwrite"
+                        )
+                    fs.write(out_path, result)
+                    if not parsed.keep:
+                        fs.remove(path)
 
         except FileNotFoundError:
             raise TerminalError(f"gzip: {path}: No such file or directory")
