@@ -67,13 +67,14 @@ def _diff_pair(
             stdout.write(f"Files {path1} and {path2} differ\n")
         return
 
+    n = parsed.unified_context
     if parsed.context:
         diff_lines = list(
-            difflib.context_diff(cmp1, cmp2, fromfile=path1, tofile=path2)
+            difflib.context_diff(cmp1, cmp2, fromfile=path1, tofile=path2, n=n)
         )
     else:
         diff_lines = list(
-            difflib.unified_diff(cmp1, cmp2, fromfile=path1, tofile=path2)
+            difflib.unified_diff(cmp1, cmp2, fromfile=path1, tofile=path2, n=n)
         )
 
     if cmp1 is not file1_lines and diff_lines:
@@ -126,6 +127,7 @@ def diff(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
     """Compare files line by line."""
     parser = CommandArgParser(prog="diff", add_help=False)
     parser.add_argument("-u", "--unified", action="store_true")
+    parser.add_argument("-U", "--unified-context", type=int, default=3)
     parser.add_argument("-c", "--context", action="store_true")
     parser.add_argument("-q", "--brief", action="store_true")
     parser.add_argument("-B", "--ignore-blank-lines", action="store_true")
