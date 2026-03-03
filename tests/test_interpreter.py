@@ -498,6 +498,25 @@ class TestConditionalOperators:
 # ---------------------------------------------------------------------------
 
 
+class TestTouchNoCreate:
+    def test_touch_c_skips_nonexistent(self, fs):
+        """touch -c should not create a file that doesn't exist."""
+        execute_script(to_script("touch -c /missing.txt"), fs)
+        assert not fs.exists("/missing.txt")
+
+    def test_touch_c_updates_existing(self, fs):
+        """touch -c should still update an existing file."""
+        fs.write("/f.txt", b"data")
+        execute_script(to_script("touch -c f.txt"), fs)
+        assert fs.exists("/f.txt")
+        assert fs.read("/f.txt") == b"data"
+
+    def test_touch_without_c_creates(self, fs):
+        """touch without -c should create the file."""
+        execute_script(to_script("touch /new.txt"), fs)
+        assert fs.exists("/new.txt")
+
+
 class TestCpArchive:
     def test_cp_archive_copies_directory(self, fs):
         """cp -a should recursively copy directory."""

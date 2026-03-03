@@ -188,13 +188,22 @@ def ls(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
 
 def touch(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
     """Update timestamps or create empty files."""
-    if not args:
+    parser = CommandArgParser(prog="touch", add_help=False)
+    parser.add_argument("-c", "--no-create", action="store_true")
+    parser.add_argument("files", nargs="*")
+
+    parsed, unknown = parser.parse_known_args(args)
+    if unknown:
+        raise TerminalError(f"touch: unknown option: {unknown[0]}")
+
+    if not parsed.files:
         raise TerminalError("touch: missing file operand")
 
-    for path in args:
+    for path in parsed.files:
         try:
             if not fs.exists(path):
-                fs.write(path, b"")
+                if not parsed.no_create:
+                    fs.write(path, b"")
             else:
                 content = fs.read(path)
                 fs.write(path, content)
