@@ -352,3 +352,34 @@ class TestSedErrors:
         with pytest.raises(TerminalError) as exc:
             execute_script(to_script("sed 's/a/b/g extra' f.txt"), fs)
         assert "trailing characters" in str(exc.value)
+
+
+# ---------------------------------------------------------------------------
+# Extended regex flag (-E / -r)
+# ---------------------------------------------------------------------------
+
+
+class TestSedExtendedRegex:
+    def test_extended_flag_accepted(self, fs):
+        """sed -E should work without error."""
+        fs.write("/f.txt", b"hello world\n")
+        out = execute_script(to_script("sed -E 's/hello/hi/' f.txt"), fs)
+        assert out == "hi world\n"
+
+    def test_r_flag_accepted(self, fs):
+        """sed -r (alias for -E) should work without error."""
+        fs.write("/f.txt", b"abc123\n")
+        out = execute_script(to_script("sed -r 's/[0-9]+/NUM/' f.txt"), fs)
+        assert out == "abcNUM\n"
+
+    def test_extended_with_groups(self, fs):
+        """ERE grouping with unescaped parens works (Python re default)."""
+        fs.write("/f.txt", b"foo bar\n")
+        out = execute_script(to_script(r"sed -E 's/(foo) (bar)/\2 \1/' f.txt"), fs)
+        assert out == "bar foo\n"
+
+    def test_extended_with_alternation(self, fs):
+        """ERE alternation with | works."""
+        fs.write("/f.txt", b"cat\ndog\nbird\n")
+        out = execute_script(to_script("sed -E 's/cat|dog/pet/' f.txt"), fs)
+        assert "pet\npet\nbird\n" == out

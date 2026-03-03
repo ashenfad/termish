@@ -400,6 +400,9 @@ def sed(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
     parser.add_argument("-n", "--quiet", "--silent", action="store_true")
     parser.add_argument("-i", "--in-place", action="store_true")
     parser.add_argument("-e", "--expression", action="append", dest="expressions")
+    # -E/-r: extended regex. Python's re module uses ERE by default, so this
+    # is accepted for compatibility but doesn't change behavior.
+    parser.add_argument("-E", "-r", "--regexp-extended", action="store_true")
     parser.add_argument("args_remainder", nargs="*")
 
     parsed, unknown = parser.parse_known_args(args)
