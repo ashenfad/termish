@@ -246,7 +246,12 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
             content_bytes = fs.read(filepath)
             content = content_bytes.decode("utf-8", errors="replace")
 
-            label = filepath if (multiple_files or parsed.recursive) else None
+            # -l always needs the filepath as label
+            label = (
+                filepath
+                if (multiple_files or parsed.recursive or parsed.files_with_matches)
+                else None
+            )
             process_content(content, label)
 
         except FileNotFoundError:
@@ -267,7 +272,7 @@ class _FindPred:
 
     __slots__ = ()
 
-    def matches(self, item: "FileInfo") -> bool:  # noqa: F821
+    def matches(self, item, fs=None) -> bool:
         raise NotImplementedError
 
 
@@ -277,7 +282,7 @@ class _NamePred(_FindPred):
     def __init__(self, pattern: str) -> None:
         self.pattern = pattern
 
-    def matches(self, item: "FileInfo") -> bool:  # noqa: F821
+    def matches(self, item, fs=None) -> bool:
         return fnmatch.fnmatch(item.name, self.pattern)
 
 
@@ -287,10 +292,83 @@ class _TypePred(_FindPred):
     def __init__(self, kind: str) -> None:
         self.kind = kind
 
-    def matches(self, item: "FileInfo") -> bool:  # noqa: F821
+    def matches(self, item, fs=None) -> bool:
         if self.kind == "f":
             return not item.is_dir
         return item.is_dir
+
+
+class _SizePred(_FindPred):
+    """Match files by size. Supports +N (greater), -N (less), N (exact).
+
+    Suffixes: c (bytes), k (KiB), M (MiB), G (GiB). Default is 512-byte blocks.
+    """
+
+    __slots__ = ("threshold", "compare")
+
+    def __init__(self, spec: str) -> None:
+        if not spec:
+            raise TerminalError("find: -size requires an argument")
+        # Parse comparison operator
+        if spec[0] == "+":
+            self.compare = "gt"
+            spec = spec[1:]
+        elif spec[0] == "-":
+            self.compare = "lt"
+            spec = spec[1:]
+        else:
+            self.compare = "eq"
+        # Parse suffix
+        multipliers = {"c": 1, "k": 1024, "M": 1024**2, "G": 1024**3}
+        if spec and spec[-1] in multipliers:
+            mult = multipliers[spec[-1]]
+            spec = spec[:-1]
+        else:
+            mult = 512  # default: 512-byte blocks
+        try:
+            self.threshold = int(spec) * mult
+        except ValueError:
+            raise TerminalError(f"find: invalid size: {spec}")
+
+    def matches(self, item, fs=None) -> bool:
+        if self.compare == "gt":
+            return item.size > self.threshold
+        elif self.compare == "lt":
+            return item.size < self.threshold
+        return item.size == self.threshold
+
+
+class _ExecPred(_FindPred):
+    """Run a command for each match (action predicate).
+
+    Tokens between -exec and \\; form the command template.
+    {} is replaced with the matched file path.
+    Returns True if the command succeeds, False otherwise.
+    When present, suppresses find's default path printing.
+    """
+
+    __slots__ = ("cmd_tokens", "stdout")
+
+    def __init__(self, cmd_tokens: list[str], stdout: TextIO) -> None:
+        self.cmd_tokens = cmd_tokens
+        self.stdout = stdout
+
+    def matches(self, item, fs=None) -> bool:
+        if fs is None:
+            return True
+        from termish.interpreter.core import execute_script
+        from termish.parser import to_script
+
+        # Build command with {} replaced by the item path
+        expanded = [tok.replace("{}", item.path) for tok in self.cmd_tokens]
+        cmd_str = " ".join(expanded)
+        try:
+            output = execute_script(to_script(cmd_str), fs)
+            if output:
+                self.stdout.write(output)
+        except Exception:
+            return False
+        return True
 
 
 class _AndPred(_FindPred):
@@ -300,8 +378,8 @@ class _AndPred(_FindPred):
         self.left = left
         self.right = right
 
-    def matches(self, item: "FileInfo") -> bool:  # noqa: F821
-        return self.left.matches(item) and self.right.matches(item)
+    def matches(self, item, fs=None) -> bool:
+        return self.left.matches(item, fs) and self.right.matches(item, fs)
 
 
 class _OrPred(_FindPred):
@@ -311,8 +389,8 @@ class _OrPred(_FindPred):
         self.left = left
         self.right = right
 
-    def matches(self, item: "FileInfo") -> bool:  # noqa: F821
-        return self.left.matches(item) or self.right.matches(item)
+    def matches(self, item, fs=None) -> bool:
+        return self.left.matches(item, fs) or self.right.matches(item, fs)
 
 
 class _NotPred(_FindPred):
@@ -321,21 +399,34 @@ class _NotPred(_FindPred):
     def __init__(self, child: _FindPred) -> None:
         self.child = child
 
-    def matches(self, item: "FileInfo") -> bool:  # noqa: F821
-        return not self.child.matches(item)
+    def matches(self, item, fs=None) -> bool:
+        return not self.child.matches(item, fs)
 
 
 class _TruePred(_FindPred):
     __slots__ = ()
 
-    def matches(self, item: "FileInfo") -> bool:  # noqa: F821
+    def matches(self, item, fs=None) -> bool:
         return True
 
 
-def _parse_find_predicates(tokens: list[str]) -> _FindPred:
+def _has_action(pred: _FindPred) -> bool:
+    """Check if predicate tree contains any action predicates (like -exec)."""
+    if isinstance(pred, _ExecPred):
+        return True
+    if isinstance(pred, (_AndPred, _OrPred)):
+        return _has_action(pred.left) or _has_action(pred.right)
+    if isinstance(pred, _NotPred):
+        return _has_action(pred.child)
+    return False
+
+
+def _parse_find_predicates(
+    tokens: list[str], stdout: TextIO | None = None
+) -> _FindPred:
     """Parse find predicate tokens into an expression tree.
 
-    Supports: -name, -type, -not / !, -and / -a, -or / -o, ( )
+    Supports: -name, -type, -size, -exec, -not / !, -and / -a, -or / -o, ( )
     Implicit AND between adjacent predicates (like real find).
     Precedence: NOT > AND > OR.
     """
@@ -411,6 +502,31 @@ def _parse_find_predicates(tokens: list[str]) -> _FindPred:
             pos += 1
             return _TypePred(kind)
 
+        if tok == "-size":
+            pos += 1
+            if pos >= len(tokens):
+                raise TerminalError("find: -size requires an argument")
+            spec = tokens[pos]
+            pos += 1
+            # Handle shell splitting: +1k → ["+", "1k"] or -100c → ["-", "100c"]
+            if spec in ("+", "-") and pos < len(tokens):
+                spec = spec + tokens[pos]
+                pos += 1
+            return _SizePred(spec)
+
+        if tok == "-exec":
+            pos += 1
+            cmd_tokens: list[str] = []
+            while pos < len(tokens) and tokens[pos] != ";":
+                cmd_tokens.append(tokens[pos])
+                pos += 1
+            if pos >= len(tokens):
+                raise TerminalError("find: -exec requires terminating ';'")
+            pos += 1  # skip ;
+            if not cmd_tokens:
+                raise TerminalError("find: -exec requires a command")
+            return _ExecPred(cmd_tokens, stdout)
+
         raise TerminalError(f"find: unknown predicate: {tok}")
 
     if not tokens:
@@ -461,7 +577,8 @@ def find(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
             predicate_tokens.append(args[i])
             i += 1
 
-    predicate = _parse_find_predicates(predicate_tokens)
+    predicate = _parse_find_predicates(predicate_tokens, stdout=stdout)
+    has_action = _has_action(predicate)
 
     try:
         all_items = fs.list_detailed(root_path, recursive=True)
@@ -479,10 +596,12 @@ def find(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
             if mindepth is not None and depth < mindepth:
                 continue
 
-            if not predicate.matches(item):
+            if not predicate.matches(item, fs):
                 continue
 
-            stdout.write(f"{item.path}\n")
+            # Suppress default path printing when action predicates exist
+            if not has_action:
+                stdout.write(f"{item.path}\n")
 
     except TerminalError:
         raise
