@@ -330,6 +330,32 @@ class TestDiffIgnoreCase:
         assert "gamma" not in out
 
 
+class TestDiffContextLines:
+    def test_diff_U_controls_context(self, fs):
+        """diff -U N should show N lines of context."""
+        lines_a = "\n".join(f"line{i}" for i in range(10)) + "\n"
+        lines_b = lines_a.replace("line5", "CHANGED")
+        fs.write("/a.txt", lines_a.encode())
+        fs.write("/b.txt", lines_b.encode())
+        # -U 1 should show only 1 line of context around the change
+        out = execute_script(to_script("diff -U 1 a.txt b.txt"), fs)
+        assert "line4" in out  # 1 line before change
+        assert "line6" in out  # 1 line after change
+        assert "line3" not in out  # 2 lines before — should be excluded
+        assert "line7" not in out  # 2 lines after — should be excluded
+
+    def test_diff_U_zero(self, fs):
+        """diff -U 0 shows only changed lines with no context."""
+        fs.write("/a.txt", b"same\nold\nsame\n")
+        fs.write("/b.txt", b"same\nnew\nsame\n")
+        out = execute_script(to_script("diff -U 0 a.txt b.txt"), fs)
+        assert "old" in out
+        assert "new" in out
+        # "same" should only appear in header lines, not as context
+        context_lines = [x for x in out.split("\n") if x.startswith(" ")]
+        assert len(context_lines) == 0
+
+
 # ---------------------------------------------------------------------------
 # basename / dirname
 # ---------------------------------------------------------------------------
@@ -407,3 +433,30 @@ class TestConditionalOperators:
     def test_mixed_operators(self, fs):
         out = execute_script(to_script("echo a ; echo b && echo c"), fs)
         assert out == "a\nb\nc\n"
+
+
+# ---------------------------------------------------------------------------
+# mv flags
+# ---------------------------------------------------------------------------
+
+
+class TestMvFlags:
+    def test_mv_with_force(self, fs):
+        """mv -f should work (force is default behavior)."""
+        fs.write("/a.txt", b"hello")
+        execute_script(to_script("mv -f a.txt b.txt"), fs)
+        assert fs.exists("/b.txt")
+        assert not fs.exists("/a.txt")
+
+    def test_mv_no_clobber(self, fs):
+        """mv -n should not overwrite existing file."""
+        fs.write("/a.txt", b"original")
+        fs.write("/b.txt", b"existing")
+        execute_script(to_script("mv -n a.txt b.txt"), fs)
+        assert fs.read("/b.txt") == b"existing"
+        assert fs.exists("/a.txt")
+
+    def test_mv_unknown_option(self, fs):
+        fs.write("/a.txt", b"")
+        with pytest.raises(TerminalError, match="unknown option"):
+            execute_script(to_script("mv --unknown a.txt b.txt"), fs)

@@ -263,10 +263,24 @@ def cp(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
 
 def mv(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
     """Move files."""
-    if len(args) != 2:
-        raise TerminalError("mv: missing destination file operand")
+    parser = CommandArgParser(prog="mv", add_help=False)
+    parser.add_argument("-f", "--force", action="store_true")
+    parser.add_argument("-n", "--no-clobber", action="store_true")
+    parser.add_argument("paths", nargs="+")
 
-    src, dst = args
+    parsed, unknown = parser.parse_known_args(args)
+    if unknown:
+        raise TerminalError(f"mv: unknown option: {unknown[0]}")
+
+    if len(parsed.paths) < 2:
+        raise TerminalError("mv: missing destination file operand")
+    if len(parsed.paths) > 2:
+        raise TerminalError("mv: too many arguments")
+
+    src, dst = parsed.paths
+    if parsed.no_clobber and fs.exists(dst):
+        return  # silently skip
+
     try:
         fs.rename(src, dst)
     except FileNotFoundError:
