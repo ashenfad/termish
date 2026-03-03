@@ -463,6 +463,24 @@ class TestErrorHandling:
 # =============================================================================
 
 
+class TestSortKeys:
+    def test_sort_keys(self, fs):
+        fs.write("/data.json", b'{"z": 1, "a": 2, "m": 3}')
+        out = execute_script(to_script("jq -S '.' /data.json"), fs)
+        # Keys should appear in alphabetical order
+        assert out.index('"a"') < out.index('"m"') < out.index('"z"')
+
+    def test_sort_keys_compact(self, fs):
+        fs.write("/data.json", b'{"z": 1, "a": 2}')
+        out = execute_script(to_script("jq -Sc '.' /data.json"), fs)
+        assert out.strip() == '{"a":2,"z":1}'
+
+    def test_sort_keys_nested(self, fs):
+        fs.write("/data.json", b'{"b": {"z": 1, "a": 2}, "a": 3}')
+        out = execute_script(to_script("jq -Sc '.' /data.json"), fs)
+        assert out.strip() == '{"a":3,"b":{"a":2,"z":1}}'
+
+
 class TestPipelineIntegration:
     def test_grep_jq_pipeline(self, fs):
         # Simulate a typical workflow: find JSON files, process them

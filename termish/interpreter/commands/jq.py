@@ -31,6 +31,7 @@ def jq(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
     parser.add_argument("-s", "--slurp", action="store_true")
     parser.add_argument("-n", "--null-input", action="store_true")
     parser.add_argument("-j", "--join-output", action="store_true")
+    parser.add_argument("-S", "--sort-keys", action="store_true")
     parser.add_argument("filter", nargs="?", default=".")
     parser.add_argument("files", nargs="*")
 
@@ -87,12 +88,13 @@ def jq(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
 
 def _output_value(value, stdout: TextIO, parsed) -> None:
     """Output a single value according to options."""
+    sort = parsed.sort_keys
     if parsed.raw_output and isinstance(value, str):
         stdout.write(value)
     elif parsed.compact:
-        stdout.write(json.dumps(value, separators=(",", ":")))
+        stdout.write(json.dumps(value, separators=(",", ":"), sort_keys=sort))
     else:
-        stdout.write(json.dumps(value, indent=2))
+        stdout.write(json.dumps(value, indent=2, sort_keys=sort))
 
     if not parsed.join_output:
         stdout.write("\n")
