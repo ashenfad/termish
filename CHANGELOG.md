@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-03-03
+
+### Added
+- **find**: compound predicates (`-a`, `-o`, `!`, parentheses), `-size` with units, `-exec`, `-iname`, `-print`, `-path`, `-delete`, `-empty`
+- **grep**: `-e` (multiple patterns), `-m`/`--max-count`, `--exclude-dir`, `-q`/`--quiet`, `-L`/`--files-without-match`, `-H`/`--with-filename`, `-h`/`--no-filename`
+- **sed**: `a` (append), `i` (insert), `c` (change), `q` (quit), `y///` (transliterate), `-E`/`-r` extended regex flag
+- **diff**: `-r` (recursive directory comparison), `-U N` (configurable context lines), `-b` (ignore whitespace changes)
+- **ls**: `-S` (sort by size), `-r` (reverse), `-1` (one per line), `-d` (list directory itself), `-F` (classify entries)
+- **head/tail**: `-c` flag for byte count mode
+- **gzip**: `-c` (write to stdout), `-1` through `-9` (compression level)
+- **tar**: `--strip-components` for extraction, traditional no-dash flag form (e.g. `tar czf`)
+- **cut**: `--output-delimiter`, `\t`/`\n` escape sequences in delimiter
+- **wc**: `-L`/`--max-line-length`
+- **touch**: `-c` (skip creating nonexistent files)
+- **cp**: `-a` (archive mode, alias for `-r`)
+- **mv**: `-f` (force) and `-n` (no-clobber) flags
+- **jq**: `-S`/`--sort-keys`
+
+### Fixed
+- **gzip -c**: compress mode now correctly writes to stdout instead of creating a `.gz` file
+
+### Changed
+- **find -exec**: removed circular dependency by passing executor callable instead of importing `core.execute_script` inside predicate class
+- Moved `grep` and `find` tests into dedicated test files
+
 ## [0.1.1] - 2026-02-28
 
 ### Fixed
