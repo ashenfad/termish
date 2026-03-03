@@ -241,8 +241,60 @@ class TestLsFlags:
 
 
 # ---------------------------------------------------------------------------
-# diff -i
+# diff -r / -i
 # ---------------------------------------------------------------------------
+
+
+class TestDiffRecursive:
+    def test_identical_dirs(self, fs):
+        fs.makedirs("/a")
+        fs.makedirs("/b")
+        fs.write("/a/f.txt", b"hello\n")
+        fs.write("/b/f.txt", b"hello\n")
+        out = execute_script(to_script("diff -r /a /b"), fs)
+        assert out == ""
+
+    def test_differing_file(self, fs):
+        fs.makedirs("/a")
+        fs.makedirs("/b")
+        fs.write("/a/f.txt", b"hello\n")
+        fs.write("/b/f.txt", b"world\n")
+        out = execute_script(to_script("diff -r /a /b"), fs)
+        assert "hello" in out
+        assert "world" in out
+
+    def test_only_in_left(self, fs):
+        fs.makedirs("/a")
+        fs.makedirs("/b")
+        fs.write("/a/extra.txt", b"data\n")
+        out = execute_script(to_script("diff -r /a /b"), fs)
+        assert "Only in /a: extra.txt" in out
+
+    def test_only_in_right(self, fs):
+        fs.makedirs("/a")
+        fs.makedirs("/b")
+        fs.write("/b/extra.txt", b"data\n")
+        out = execute_script(to_script("diff -r /a /b"), fs)
+        assert "Only in /b: extra.txt" in out
+
+    def test_nested_dirs(self, fs):
+        fs.makedirs("/a/sub")
+        fs.makedirs("/b/sub")
+        fs.write("/a/sub/f.txt", b"one\n")
+        fs.write("/b/sub/f.txt", b"two\n")
+        out = execute_script(to_script("diff -r /a /b"), fs)
+        assert "one" in out
+        assert "two" in out
+
+    def test_recursive_brief(self, fs):
+        fs.makedirs("/a")
+        fs.makedirs("/b")
+        fs.write("/a/f.txt", b"hello\n")
+        fs.write("/b/f.txt", b"world\n")
+        out = execute_script(to_script("diff -rq /a /b"), fs)
+        assert "differ" in out
+        # Brief mode shouldn't show actual content
+        assert "hello" not in out
 
 
 class TestDiffIgnoreCase:
