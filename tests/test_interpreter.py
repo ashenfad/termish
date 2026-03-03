@@ -282,6 +282,26 @@ class TestLsFlags:
         lines = out.strip().split("\n")
         assert len(lines) == 2
 
+    def test_ls_classify(self, fs):
+        """ls -F appends / to directories."""
+        fs.makedirs("/mydir")
+        fs.write("/myfile.txt", b"")
+        out = execute_script(to_script("ls -F /"), fs)
+        assert "mydir/" in out
+        assert "myfile.txt" in out
+        assert "myfile.txt/" not in out
+
+    def test_ls_classify_long(self, fs):
+        """ls -lF appends / to directories in long format."""
+        fs.makedirs("/sub")
+        fs.write("/f.txt", b"")
+        out = execute_script(to_script("ls -lF /"), fs)
+        lines = out.strip().split("\n")
+        dir_line = [line for line in lines if "sub" in line][0]
+        file_line = [line for line in lines if "f.txt" in line][0]
+        assert dir_line.endswith("sub/")
+        assert not file_line.endswith("/")
+
     def test_ls_directory_flag(self, fs):
         """ls -d lists the directory itself, not its contents."""
         fs.makedirs("/mydir")

@@ -79,6 +79,7 @@ def ls(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
     parser.add_argument("-S", action="store_true")
     parser.add_argument("-r", action="store_true")
     parser.add_argument("-d", "--directory", action="store_true")
+    parser.add_argument("-F", "--classify", action="store_true")
     parser.add_argument("-1", dest="one_per_line", action="store_true")
     parser.add_argument("paths", nargs="*", default=["."])
 
@@ -128,7 +129,7 @@ def ls(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
                     stdout.write(f"{path}\n")
                 continue
 
-            needs_detailed = parsed.l or parsed.t or parsed.S
+            needs_detailed = parsed.l or parsed.t or parsed.S or parsed.classify
             if needs_detailed:
                 items = fs.list_detailed(path, recursive=parsed.R)
                 if not parsed.a:
@@ -154,11 +155,15 @@ def ls(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
                             if item.modified_at
                             else " " * 16
                         )
+                        suffix = "/" if parsed.classify and item.is_dir else ""
                         stdout.write(
-                            f"{type_char}rw-r--r-- 1 agent agent {size} {time} {item.path}\n"
+                            f"{type_char}rw-r--r-- 1 agent agent {size} {time} {item.path}{suffix}\n"
                         )
                 else:
-                    filtered = [item.path for item in items]
+                    filtered = [
+                        item.path + ("/" if parsed.classify and item.is_dir else "")
+                        for item in items
+                    ]
                     if filtered:
                         stdout.write("\n".join(filtered) + "\n")
             else:
