@@ -184,3 +184,50 @@ class TestGrepMultiPattern:
         """grep with no args at all should error."""
         with pytest.raises(TerminalError, match="no pattern"):
             execute_script(to_script("echo test | grep"), fs)
+
+
+# ---------------------------------------------------------------------------
+# grep -m (max count)
+# ---------------------------------------------------------------------------
+
+
+class TestGrepMaxCount:
+    def test_max_count_limits_output(self, fs):
+        fs.write("/f.txt", b"aaa\nbbb\naaa\naaa\n")
+        out = execute_script(to_script("grep -m 2 aaa f.txt"), fs)
+        assert out.strip().split("\n") == ["aaa", "aaa"]
+
+    def test_max_count_one(self, fs):
+        fs.write("/f.txt", b"one\ntwo\none\n")
+        out = execute_script(to_script("grep -m 1 one f.txt"), fs)
+        assert out == "one\n"
+
+    def test_max_count_from_stdin(self, fs):
+        out = execute_script(to_script("echo 'a\nb\na\na' | grep -m 2 a"), fs)
+        lines = out.strip().split("\n")
+        assert len(lines) == 2
+
+
+# ---------------------------------------------------------------------------
+# grep --exclude-dir
+# ---------------------------------------------------------------------------
+
+
+class TestGrepExcludeDir:
+    def test_exclude_dir(self, fs):
+        fs.makedirs("/src/.git/objects")
+        fs.write("/src/.git/objects/abc", b"TODO fix\n")
+        fs.write("/src/main.py", b"TODO fix\n")
+        out = execute_script(to_script("grep -r --exclude-dir '.git' TODO /src"), fs)
+        assert "main.py" in out
+        assert ".git" not in out
+
+    def test_exclude_dir_pattern(self, fs):
+        fs.makedirs("/project/node_modules/pkg")
+        fs.write("/project/node_modules/pkg/index.js", b"hello\n")
+        fs.write("/project/app.js", b"hello\n")
+        out = execute_script(
+            to_script("grep -r --exclude-dir 'node_modules' hello /project"), fs
+        )
+        assert "app.js" in out
+        assert "node_modules" not in out
