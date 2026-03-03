@@ -114,12 +114,15 @@ class TestGzipStdout:
         # Original should be kept
         assert fs.exists("/f.txt.gz")
 
-    def test_gzip_c_compress_keeps_original(self, fs):
-        """gzip -c should keep the original file."""
+    def test_gzip_c_compress_to_stdout(self, fs):
+        """gzip -c should write compressed data to stdout and keep original."""
         fs.write("/f.txt", b"data")
-        execute_script(to_script("gzip -c f.txt"), fs)
+        out = execute_script(to_script("gzip -c f.txt"), fs)
+        # Original file kept, no .gz file created
         assert fs.exists("/f.txt")
-        assert fs.exists("/f.txt.gz")
+        assert not fs.exists("/f.txt.gz")
+        # stdout contains valid gzip data (encoded as latin-1)
+        assert gzip_module.decompress(out.encode("latin-1")) == b"data"
 
 
 class TestGzipLevel:
