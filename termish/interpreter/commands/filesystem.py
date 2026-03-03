@@ -223,12 +223,16 @@ def cp(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
     """Copy files."""
     parser = CommandArgParser(prog="cp", add_help=False)
     parser.add_argument("-r", "-R", action="store_true")
+    parser.add_argument("-a", "--archive", action="store_true")
     parser.add_argument("src", nargs="+")
     parser.add_argument("dst")
 
     parsed, unknown = parser.parse_known_args(args)
     if unknown:
         raise TerminalError(f"cp: unknown option: {unknown[0]}")
+
+    if parsed.archive:
+        parsed.r = True
 
     if len(parsed.src) > 1:
         sources = parsed.src
