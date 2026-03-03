@@ -17,6 +17,7 @@ def wc(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
     parser.add_argument("-w", "--words", action="store_true")
     parser.add_argument("-c", "--bytes", action="store_true")
     parser.add_argument("-m", "--chars", action="store_true")
+    parser.add_argument("-L", "--max-line-length", action="store_true")
     parser.add_argument("files", nargs="*")
 
     parsed, unknown = parser.parse_known_args(args)
@@ -27,21 +28,28 @@ def wc(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
     show_lines = parsed.lines
     show_words = parsed.words
     show_bytes = parsed.bytes or parsed.chars  # -m same as -c for UTF-8
-    if not (show_lines or show_words or show_bytes):
+    show_max_line = parsed.max_line_length
+    if not (show_lines or show_words or show_bytes or show_max_line):
         show_lines = show_words = show_bytes = True
 
-    totals = {"lines": 0, "words": 0, "bytes": 0}
+    totals = {"lines": 0, "words": 0, "bytes": 0, "max_line": 0}
     results: list[tuple[dict[str, int], str]] = []
 
     def count_content(content: str, name: str):
+        lines = content.splitlines()
+        max_line = max((len(line) for line in lines), default=0)
         counts = {
             "lines": content.count("\n"),
             "words": len(content.split()),
             "bytes": len(content.encode("utf-8")),
+            "max_line": max_line,
         }
         results.append((counts, name))
         for key in totals:
-            totals[key] += counts[key]
+            if key == "max_line":
+                totals[key] = max(totals[key], counts[key])
+            else:
+                totals[key] += counts[key]
 
     if not parsed.files:
         # Read from stdin
@@ -70,6 +78,8 @@ def wc(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
             parts.append(f"{counts['words']:>{width}}")
         if show_bytes:
             parts.append(f"{counts['bytes']:>{width}}")
+        if show_max_line:
+            parts.append(f"{counts['max_line']:>{width}}")
         line = " ".join(parts)
         if name:
             line += f" {name}"
