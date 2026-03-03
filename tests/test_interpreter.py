@@ -498,6 +498,16 @@ class TestConditionalOperators:
 # ---------------------------------------------------------------------------
 
 
+class TestCpArchive:
+    def test_cp_archive_copies_directory(self, fs):
+        """cp -a should recursively copy directory."""
+        fs.makedirs("/src/sub")
+        fs.write("/src/sub/f.txt", b"data")
+        execute_script(to_script("cp -a src dst"), fs)
+        assert fs.exists("/dst/sub/f.txt")
+        assert fs.read("/dst/sub/f.txt") == b"data"
+
+
 class TestMvFlags:
     def test_mv_with_force(self, fs):
         """mv -f should work (force is default behavior)."""
