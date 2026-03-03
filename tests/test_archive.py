@@ -103,6 +103,40 @@ class TestGzip:
             execute_script(script, fs)
 
 
+class TestGzipStdout:
+    def test_gzip_c_decompress_to_stdout(self, fs):
+        """gzip -cd should decompress to stdout."""
+        original = b"hello world"
+        compressed = gzip_module.compress(original)
+        fs.write("/f.txt.gz", compressed)
+        out = execute_script(to_script("gzip -cd f.txt.gz"), fs)
+        assert out == "hello world"
+        # Original should be kept
+        assert fs.exists("/f.txt.gz")
+
+    def test_gzip_c_compress_keeps_original(self, fs):
+        """gzip -c should keep the original file."""
+        fs.write("/f.txt", b"data")
+        execute_script(to_script("gzip -c f.txt"), fs)
+        assert fs.exists("/f.txt")
+        assert fs.exists("/f.txt.gz")
+
+
+class TestGzipLevel:
+    def test_compression_level(self, fs):
+        """gzip -1 and -9 should both produce valid gzip output."""
+        data = b"x" * 1000
+        fs.write("/f1.txt", data)
+        fs.write("/f9.txt", data)
+        execute_script(to_script("gzip -1 f1.txt"), fs)
+        execute_script(to_script("gzip -9 f9.txt"), fs)
+        # Both should decompress correctly
+        assert gzip_module.decompress(fs.read("/f1.txt.gz")) == data
+        assert gzip_module.decompress(fs.read("/f9.txt.gz")) == data
+        # -1 should produce larger output than -9 (less compression)
+        assert len(fs.read("/f1.txt.gz")) >= len(fs.read("/f9.txt.gz"))
+
+
 class TestGunzip:
     """Tests for gunzip command."""
 
