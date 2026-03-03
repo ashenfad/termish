@@ -231,3 +231,27 @@ class TestGrepExcludeDir:
         )
         assert "app.js" in out
         assert "node_modules" not in out
+
+
+# ---------------------------------------------------------------------------
+# grep -q (quiet)
+# ---------------------------------------------------------------------------
+
+
+class TestGrepQuiet:
+    def test_quiet_no_output(self, fs):
+        fs.write("/f.txt", b"hello world\n")
+        out = execute_script(to_script("grep -q hello f.txt"), fs)
+        assert out == ""
+
+    def test_quiet_with_conditional(self, fs):
+        """grep -q pattern && echo found — should succeed without output."""
+        fs.write("/f.txt", b"hello\n")
+        out = execute_script(to_script("grep -q hello f.txt && echo found"), fs)
+        assert out == "found\n"
+
+    def test_quiet_no_match_still_silent(self, fs):
+        """grep -q with no match should still produce no output."""
+        fs.write("/f.txt", b"hello\n")
+        out = execute_script(to_script("grep -q nope f.txt"), fs)
+        assert out == ""

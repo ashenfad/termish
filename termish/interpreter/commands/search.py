@@ -1,6 +1,7 @@
 "Search commands (grep, find) for the terminal interpreter."
 
 import fnmatch
+import io
 import re
 from typing import TextIO
 
@@ -26,6 +27,7 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
     parser.add_argument("-c", "--count", action="store_true")
     parser.add_argument("-w", "--word-regexp", action="store_true")
     parser.add_argument("-o", "--only-matching", action="store_true")
+    parser.add_argument("-q", "--quiet", "--silent", action="store_true")
     parser.add_argument("-m", "--max-count", type=int, default=0)
     parser.add_argument("--include", type=str, default=None)
     parser.add_argument("--exclude", type=str, default=None)
@@ -78,8 +80,13 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
 
     matches_total = 0
     has_context = before_context > 0 or after_context > 0
+    quiet = parsed.quiet
 
     max_count = parsed.max_count
+    if quiet and not max_count:
+        max_count = 1  # -q exits after first match
+    if quiet:
+        stdout = io.StringIO()  # suppress all output
 
     def process_content(content: str, label: str | None) -> None:
         nonlocal matches_total
@@ -322,6 +329,36 @@ class _INamePred(_FindPred):
         return fnmatch.fnmatch(item.name.lower(), self.pattern)
 
 
+class _PathPred(_FindPred):
+    """Match on the full path with fnmatch."""
+
+    __slots__ = ("pattern",)
+
+    def __init__(self, pattern: str) -> None:
+        self.pattern = pattern
+
+    def matches(self, item, fs=None) -> bool:
+        return fnmatch.fnmatch(item.path, self.pattern)
+
+
+class _DeletePred(_FindPred):
+    """Action predicate: delete matched files/directories."""
+
+    __slots__ = ()
+
+    def matches(self, item, fs=None) -> bool:
+        if fs is None:
+            return True
+        try:
+            if item.is_dir:
+                fs.rmdir(item.path)
+            else:
+                fs.remove(item.path)
+        except Exception:
+            return False
+        return True
+
+
 class _PrintPred(_FindPred):
     """Explicit -print action: writes the path to stdout."""
 
@@ -460,8 +497,8 @@ class _TruePred(_FindPred):
 
 
 def _has_action(pred: _FindPred) -> bool:
-    """Check if predicate tree contains any action predicates (like -exec, -print)."""
-    if isinstance(pred, (_ExecPred, _PrintPred)):
+    """Check if predicate tree contains any action predicates."""
+    if isinstance(pred, (_ExecPred, _PrintPred, _DeletePred)):
         return True
     if isinstance(pred, (_AndPred, _OrPred)):
         return _has_action(pred.left) or _has_action(pred.right)
@@ -550,9 +587,21 @@ def _parse_find_predicates(
             pos += 1
             return _INamePred(pattern)
 
+        if tok == "-path":
+            pos += 1
+            if pos >= len(tokens):
+                raise TerminalError("find: -path requires a pattern")
+            pattern = tokens[pos]
+            pos += 1
+            return _PathPred(pattern)
+
         if tok == "-print":
             pos += 1
             return _PrintPred(stdout)
+
+        if tok == "-delete":
+            pos += 1
+            return _DeletePred()
 
         if tok == "-type":
             pos += 1
