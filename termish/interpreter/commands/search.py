@@ -26,8 +26,10 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
     parser.add_argument("-c", "--count", action="store_true")
     parser.add_argument("-w", "--word-regexp", action="store_true")
     parser.add_argument("-o", "--only-matching", action="store_true")
+    parser.add_argument("-m", "--max-count", type=int, default=0)
     parser.add_argument("--include", type=str, default=None)
     parser.add_argument("--exclude", type=str, default=None)
+    parser.add_argument("--exclude-dir", type=str, default=None)
     parser.add_argument("-e", action="append", dest="patterns")
     parser.add_argument("positional", nargs="*")
 
@@ -77,9 +79,12 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
     matches_total = 0
     has_context = before_context > 0 or after_context > 0
 
+    max_count = parsed.max_count
+
     def process_content(content: str, label: str | None) -> None:
         nonlocal matches_total
         lines = content.splitlines()
+        file_matches = 0
 
         # Count mode
         if parsed.count:
@@ -100,6 +105,7 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
         if parsed.only_matching:
             for i, line in enumerate(lines):
                 for m in regex.finditer(line):
+                    file_matches += 1
                     matches_total += 1
                     if parsed.files_with_matches:
                         if label:
@@ -111,6 +117,10 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
                     if parsed.line_number:
                         prefix += f"{i + 1}:"
                     stdout.write(f"{prefix}{m.group()}\n")
+                    if max_count and file_matches >= max_count:
+                        return
+                if max_count and file_matches >= max_count:
+                    return
             return
 
         if has_context:
@@ -131,6 +141,8 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
                         if label:
                             stdout.write(f"{label}\n")
                         return
+                    if max_count and len(matching_lines) >= max_count:
+                        break
 
             # Second pass: mark context lines
             for match_idx in matching_lines:
@@ -175,6 +187,7 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
                     is_match = not is_match
 
                 if is_match:
+                    file_matches += 1
                     matches_total += 1
                     if parsed.files_with_matches:
                         if label:
@@ -191,6 +204,9 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
                         stdout.write(f"{prefix}{line}\n")
                     else:
                         stdout.write(f"{line}\n")
+
+                    if max_count and file_matches >= max_count:
+                        return
 
     if not parsed.files and not parsed.recursive:
         content = stdin.read()
@@ -225,7 +241,7 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
             else:
                 files_to_search.append(path)
 
-    # Apply --include/--exclude filters
+    # Apply --include/--exclude/--exclude-dir filters
     if parsed.include:
         files_to_search = [
             f
@@ -237,6 +253,14 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
             f
             for f in files_to_search
             if not fnmatch.fnmatch(f.split("/")[-1], parsed.exclude)
+        ]
+    if parsed.exclude_dir:
+        files_to_search = [
+            f
+            for f in files_to_search
+            if not any(
+                fnmatch.fnmatch(part, parsed.exclude_dir) for part in f.split("/")[:-1]
+            )
         ]
 
     multiple_files = len(files_to_search) > 1 or parsed.recursive
@@ -284,6 +308,31 @@ class _NamePred(_FindPred):
 
     def matches(self, item, fs=None) -> bool:
         return fnmatch.fnmatch(item.name, self.pattern)
+
+
+class _INamePred(_FindPred):
+    """Case-insensitive name match."""
+
+    __slots__ = ("pattern",)
+
+    def __init__(self, pattern: str) -> None:
+        self.pattern = pattern.lower()
+
+    def matches(self, item, fs=None) -> bool:
+        return fnmatch.fnmatch(item.name.lower(), self.pattern)
+
+
+class _PrintPred(_FindPred):
+    """Explicit -print action: writes the path to stdout."""
+
+    __slots__ = ("stdout",)
+
+    def __init__(self, stdout: TextIO) -> None:
+        self.stdout = stdout
+
+    def matches(self, item, fs=None) -> bool:
+        self.stdout.write(f"{item.path}\n")
+        return True
 
 
 class _TypePred(_FindPred):
@@ -411,8 +460,8 @@ class _TruePred(_FindPred):
 
 
 def _has_action(pred: _FindPred) -> bool:
-    """Check if predicate tree contains any action predicates (like -exec)."""
-    if isinstance(pred, _ExecPred):
+    """Check if predicate tree contains any action predicates (like -exec, -print)."""
+    if isinstance(pred, (_ExecPred, _PrintPred)):
         return True
     if isinstance(pred, (_AndPred, _OrPred)):
         return _has_action(pred.left) or _has_action(pred.right)
@@ -426,7 +475,8 @@ def _parse_find_predicates(
 ) -> _FindPred:
     """Parse find predicate tokens into an expression tree.
 
-    Supports: -name, -type, -size, -exec, -not / !, -and / -a, -or / -o, ( )
+    Supports: -name, -iname, -type, -size, -exec, -print,
+              -not / !, -and / -a, -or / -o, ( )
     Implicit AND between adjacent predicates (like real find).
     Precedence: NOT > AND > OR.
     """
@@ -491,6 +541,18 @@ def _parse_find_predicates(
             pattern = tokens[pos]
             pos += 1
             return _NamePred(pattern)
+
+        if tok == "-iname":
+            pos += 1
+            if pos >= len(tokens):
+                raise TerminalError("find: -iname requires a pattern")
+            pattern = tokens[pos]
+            pos += 1
+            return _INamePred(pattern)
+
+        if tok == "-print":
+            pos += 1
+            return _PrintPred(stdout)
 
         if tok == "-type":
             pos += 1
