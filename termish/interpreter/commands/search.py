@@ -399,6 +399,22 @@ class _TypePred(_FindPred):
         return item.is_dir
 
 
+class _EmptyPred(_FindPred):
+    """Match empty files (size 0) or empty directories (no children)."""
+
+    __slots__ = ()
+
+    def matches(self, item, fs=None) -> bool:
+        if fs is None:
+            return False
+        if item.is_dir:
+            try:
+                return len(fs.list(item.path)) == 0
+            except Exception:
+                return False
+        return item.size == 0
+
+
 class _SizePred(_FindPred):
     """Match files by size. Supports +N (greater), -N (less), N (exact).
 
@@ -627,6 +643,10 @@ def _parse_find_predicates(
                 raise TerminalError(f"find: unknown type '{kind}' (use 'f' or 'd')")
             pos += 1
             return _TypePred(kind)
+
+        if tok == "-empty":
+            pos += 1
+            return _EmptyPred()
 
         if tok == "-size":
             pos += 1
