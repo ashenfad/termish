@@ -243,6 +243,7 @@ def cut(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
     parser.add_argument("-c", "--characters", type=str, default=None)
     parser.add_argument("-b", "--bytes", type=str, default=None)
     parser.add_argument("--complement", action="store_true")
+    parser.add_argument("--output-delimiter", type=str, default=None)
     parser.add_argument("files", nargs="*")
 
     parsed, unknown = parser.parse_known_args(args)
@@ -333,12 +334,19 @@ def cut(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
             except IsADirectoryError:
                 raise TerminalError(f"cut: {path}: Is a directory")
 
+    # Determine output delimiter
+    out_delim = (
+        parsed.output_delimiter
+        if parsed.output_delimiter is not None
+        else parsed.delimiter
+    )
+
     # Process each line
     for line in lines:
         if mode == "fields":
             fields = line.split(parsed.delimiter)
             selected = select_items(fields, ranges, parsed.complement)
-            stdout.write(parsed.delimiter.join(selected) + "\n")
+            stdout.write(out_delim.join(selected) + "\n")
         else:  # chars/bytes
             chars = list(line)
             selected = select_items(chars, ranges, parsed.complement)

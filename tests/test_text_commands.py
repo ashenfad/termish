@@ -209,6 +209,20 @@ class TestCut:
         output = execute_script(to_script("cut -d '\\n' -f 1 f.txt"), fs)
         assert "line1" in output
 
+    def test_cut_output_delimiter(self, fs):
+        """--output-delimiter uses a different delimiter for output."""
+        fs.write("/f.txt", b"a,b,c\n")
+        output = execute_script(
+            to_script("cut -d ',' -f '1,3' --output-delimiter='\t' f.txt"), fs
+        )
+        assert output.strip() == "a\tc"
+
+    def test_cut_output_delimiter_from_stdin(self, fs):
+        output = execute_script(
+            to_script("echo 'x:y:z' | cut -d ':' -f '1,3' --output-delimiter=' '"), fs
+        )
+        assert output.strip() == "x z"
+
 
 # =============================================================================
 # tee tests
