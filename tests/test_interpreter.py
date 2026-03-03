@@ -168,6 +168,49 @@ class TestHeadTailShorthand:
 
 
 # ---------------------------------------------------------------------------
+# head -c / tail -c (byte count)
+# ---------------------------------------------------------------------------
+
+
+class TestHeadTailBytes:
+    def test_head_bytes_from_file(self, fs):
+        fs.write("/f.txt", b"abcdefghij")
+        out = execute_script(to_script("head -c 5 f.txt"), fs)
+        assert out == "abcde"
+
+    def test_head_bytes_from_stdin(self, fs):
+        out = execute_script(to_script("echo 'abcdefghij' | head -c 4"), fs)
+        assert out == "abcd"
+
+    def test_tail_bytes_from_file(self, fs):
+        fs.write("/f.txt", b"abcdefghij")
+        out = execute_script(to_script("tail -c 5 f.txt"), fs)
+        assert out == "fghij"
+
+    def test_tail_bytes_from_stdin(self, fs):
+        out = execute_script(to_script("echo 'abcdefghij' | tail -c 4"), fs)
+        assert out == "hij\n"
+
+    def test_head_bytes_multiple_files(self, fs):
+        fs.write("/a.txt", b"aaaa")
+        fs.write("/b.txt", b"bbbb")
+        out = execute_script(to_script("head -c 2 a.txt b.txt"), fs)
+        assert "==> a.txt <==" in out
+        assert "aa" in out
+        assert "==> b.txt <==" in out
+        assert "bb" in out
+
+    def test_tail_bytes_multiple_files(self, fs):
+        fs.write("/a.txt", b"aaaa")
+        fs.write("/b.txt", b"bbbb")
+        out = execute_script(to_script("tail -c 2 a.txt b.txt"), fs)
+        assert "==> a.txt <==" in out
+        assert "aa" in out
+        assert "==> b.txt <==" in out
+        assert "bb" in out
+
+
+# ---------------------------------------------------------------------------
 # ls -h / -t / -S / -r / -1
 # ---------------------------------------------------------------------------
 

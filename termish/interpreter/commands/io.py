@@ -164,21 +164,27 @@ def head(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
 
     parser = CommandArgParser(prog="head", add_help=False)
     parser.add_argument("-n", "--lines", type=int, default=10)
+    parser.add_argument("-c", "--bytes", type=int, default=0)
     parser.add_argument("files", nargs="*")
 
     parsed, unknown = parser.parse_known_args(processed_args)
     if unknown:
         raise TerminalError(f"head: unknown option: {unknown[0]}")
 
-    limit = parsed.lines
+    byte_mode = parsed.bytes > 0
+    limit = parsed.bytes if byte_mode else parsed.lines
 
     if not parsed.files:
-        count = 0
-        for line in stdin:
-            if count >= limit:
-                break
-            stdout.write(line)
-            count += 1
+        content = stdin.read()
+        if byte_mode:
+            stdout.write(content[:limit])
+        else:
+            count = 0
+            for line in content.splitlines(keepends=True):
+                if count >= limit:
+                    break
+                stdout.write(line)
+                count += 1
         return
 
     for i, path in enumerate(parsed.files):
@@ -187,10 +193,13 @@ def head(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
 
         try:
             content_bytes = fs.read(path)
-            content = content_bytes.decode("utf-8", errors="replace")
-            lines = content.splitlines(keepends=True)
-            for line in lines[:limit]:
-                stdout.write(line)
+            if byte_mode:
+                stdout.write(content_bytes[:limit].decode("utf-8", errors="replace"))
+            else:
+                content = content_bytes.decode("utf-8", errors="replace")
+                lines = content.splitlines(keepends=True)
+                for line in lines[:limit]:
+                    stdout.write(line)
 
         except Exception as e:
             raise TerminalError(f"head: cannot open '{path}': {e}")
@@ -212,11 +221,36 @@ def tail(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
 
     parser = CommandArgParser(prog="tail", add_help=False)
     parser.add_argument("-n", "--lines", type=str, default="10")
+    parser.add_argument("-c", "--bytes", type=int, default=0)
     parser.add_argument("files", nargs="*")
 
     parsed, unknown = parser.parse_known_args(processed_args)
     if unknown:
         raise TerminalError(f"tail: unknown option: {unknown[0]}")
+
+    byte_mode = parsed.bytes > 0
+
+    if byte_mode:
+        byte_limit = parsed.bytes
+
+        if not parsed.files:
+            content = stdin.read()
+            stdout.write(content[-byte_limit:])
+            return
+
+        for i, path in enumerate(parsed.files):
+            if len(parsed.files) > 1:
+                stdout.write(f"==> {path} <==\n")
+            try:
+                content_bytes = fs.read(path)
+                stdout.write(
+                    content_bytes[-byte_limit:].decode("utf-8", errors="replace")
+                )
+            except Exception as e:
+                raise TerminalError(f"tail: cannot open '{path}': {e}")
+            if i < len(parsed.files) - 1:
+                stdout.write("\n")
+        return
 
     # Parse limit: "+N" means from line N onwards, plain N means last N lines
     # Handle case where parser splits "+3" into "+" and "3"
