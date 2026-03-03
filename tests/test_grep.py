@@ -255,3 +255,48 @@ class TestGrepQuiet:
         fs.write("/f.txt", b"hello\n")
         out = execute_script(to_script("grep -q nope f.txt"), fs)
         assert out == ""
+
+
+# ---------------------------------------------------------------------------
+# grep -L (files without matches)
+# ---------------------------------------------------------------------------
+
+
+class TestGrepFilesWithoutMatch:
+    def test_files_without_match(self, fs):
+        fs.write("/a.txt", b"hello\n")
+        fs.write("/b.txt", b"world\n")
+        out = execute_script(to_script("grep -L hello a.txt b.txt"), fs)
+        assert "b.txt" in out
+        assert "a.txt" not in out
+
+    def test_files_without_match_all_match(self, fs):
+        fs.write("/a.txt", b"hello\n")
+        fs.write("/b.txt", b"hello world\n")
+        out = execute_script(to_script("grep -L hello a.txt b.txt"), fs)
+        assert out == ""
+
+    def test_files_without_match_none_match(self, fs):
+        fs.write("/a.txt", b"foo\n")
+        fs.write("/b.txt", b"bar\n")
+        out = execute_script(to_script("grep -L hello a.txt b.txt"), fs)
+        assert "a.txt" in out
+        assert "b.txt" in out
+
+
+# ---------------------------------------------------------------------------
+# grep -H / -h (filename control)
+# ---------------------------------------------------------------------------
+
+
+class TestGrepFilenameControl:
+    def test_with_filename_single_file(self, fs):
+        fs.write("/f.txt", b"hello\n")
+        out = execute_script(to_script("grep -H hello f.txt"), fs)
+        assert out == "f.txt:hello\n"
+
+    def test_no_filename_multiple_files(self, fs):
+        fs.write("/a.txt", b"hello\n")
+        fs.write("/b.txt", b"hello\n")
+        out = execute_script(to_script("grep -h hello a.txt b.txt"), fs)
+        assert out == "hello\nhello\n"
