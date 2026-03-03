@@ -431,3 +431,28 @@ class TestSedQuit:
     def test_quit_from_stdin(self, fs):
         out = execute_script(to_script("echo 'a\nb\nc\nd' | sed '3q'"), fs)
         assert out == "a\nb\nc\n"
+
+
+# ---------------------------------------------------------------------------
+# sed y/// (transliterate)
+# ---------------------------------------------------------------------------
+
+
+class TestSedTransliterate:
+    def test_basic_transliterate(self, fs):
+        fs.write("/f.txt", b"hello\n")
+        out = execute_script(to_script("sed 'y/helo/HELO/' f.txt"), fs)
+        assert out == "HELLO\n"
+
+    def test_transliterate_from_stdin(self, fs):
+        out = execute_script(to_script("echo 'abc' | sed 'y/abc/xyz/'"), fs)
+        assert out == "xyz\n"
+
+    def test_transliterate_with_address(self, fs):
+        fs.write("/f.txt", b"aaa\nbbb\nccc\n")
+        out = execute_script(to_script("sed '2y/b/B/' f.txt"), fs)
+        assert out == "aaa\nBBB\nccc\n"
+
+    def test_transliterate_mismatched_length(self, fs):
+        with pytest.raises(TerminalError, match="same length"):
+            execute_script(to_script("echo test | sed 'y/ab/xyz/'"), fs)
