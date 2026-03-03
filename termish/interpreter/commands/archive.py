@@ -78,13 +78,8 @@ def gzip(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
                 result = gzip_module.compress(content, compresslevel=compress_level)
 
                 if parsed.stdout:
-                    # -c with compress: write to file but keep original
-                    out_path = path + ".gz"
-                    if fs.exists(out_path) and not parsed.force:
-                        raise TerminalError(
-                            f"gzip: {out_path} already exists; use -f to overwrite"
-                        )
-                    fs.write(out_path, result)
+                    # -c: write compressed data to stdout, keep original
+                    stdout.write(result.decode("latin-1"))
                 else:
                     out_path = path + ".gz"
                     if fs.exists(out_path) and not parsed.force:
