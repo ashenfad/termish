@@ -127,3 +127,60 @@ class TestGrepFlags:
         out = execute_script(to_script("grep -r --exclude '*.txt' TODO /src"), fs)
         assert "a.py" in out
         assert "a.txt" not in out
+
+
+# ---------------------------------------------------------------------------
+# grep -e (multiple patterns)
+# ---------------------------------------------------------------------------
+
+
+class TestGrepMultiPattern:
+    def test_single_e_flag(self, fs):
+        fs.write("/f.txt", b"apple\nbanana\ncherry\n")
+        out = execute_script(to_script("grep -e 'apple' f.txt"), fs)
+        assert "apple" in out
+        assert "banana" not in out
+
+    def test_two_e_flags(self, fs):
+        fs.write("/f.txt", b"apple\nbanana\ncherry\n")
+        out = execute_script(to_script("grep -e 'apple' -e 'cherry' f.txt"), fs)
+        assert "apple" in out
+        assert "cherry" in out
+        assert "banana" not in out
+
+    def test_three_e_flags(self, fs):
+        fs.write("/f.txt", b"one\ntwo\nthree\nfour\n")
+        out = execute_script(to_script("grep -e one -e two -e three f.txt"), fs)
+        lines = out.strip().split("\n")
+        assert len(lines) == 3
+        assert "four" not in out
+
+    def test_e_with_count(self, fs):
+        fs.write("/f.txt", b"apple\nbanana\napricot\nblueberry\n")
+        out = execute_script(to_script("grep -c -e 'apple' -e 'banana' f.txt"), fs)
+        assert out.strip() == "2"
+
+    def test_e_with_invert(self, fs):
+        fs.write("/f.txt", b"apple\nbanana\ncherry\n")
+        out = execute_script(to_script("grep -v -e 'apple' -e 'cherry' f.txt"), fs)
+        assert out.strip() == "banana"
+
+    def test_e_with_fixed_strings(self, fs):
+        fs.write("/f.txt", b"a.b\nc.d\ne.f\n")
+        out = execute_script(to_script("grep -F -e 'a.b' -e 'e.f' f.txt"), fs)
+        assert "a.b" in out
+        assert "e.f" in out
+        assert "c.d" not in out
+
+    def test_e_from_stdin(self, fs):
+        out = execute_script(
+            to_script("echo 'apple\nbanana\ncherry' | grep -e apple -e cherry"), fs
+        )
+        assert "apple" in out
+        assert "cherry" in out
+        assert "banana" not in out
+
+    def test_no_pattern_errors(self, fs):
+        """grep with no args at all should error."""
+        with pytest.raises(TerminalError, match="no pattern"):
+            execute_script(to_script("echo test | grep"), fs)

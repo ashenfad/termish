@@ -28,12 +28,24 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
     parser.add_argument("-o", "--only-matching", action="store_true")
     parser.add_argument("--include", type=str, default=None)
     parser.add_argument("--exclude", type=str, default=None)
-    parser.add_argument("pattern")
-    parser.add_argument("files", nargs="*")
+    parser.add_argument("-e", action="append", dest="patterns")
+    parser.add_argument("positional", nargs="*")
 
     parsed, unknown = parser.parse_known_args(args)
     if unknown:
         raise TerminalError(f"grep: unknown option: {unknown[0]}")
+
+    # Resolve patterns and file list.
+    # With -e: all positional args are files.
+    # Without -e: first positional is the pattern, rest are files.
+    if parsed.patterns:
+        raw_patterns = parsed.patterns
+        parsed.files = parsed.positional
+    else:
+        if not parsed.positional:
+            raise TerminalError("grep: no pattern given")
+        raw_patterns = [parsed.positional[0]]
+        parsed.files = parsed.positional[1:]
 
     # -C sets both before and after context
     before_context = parsed.before_context
@@ -46,14 +58,19 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
     if parsed.ignore_case:
         flags |= re.IGNORECASE
 
-    pattern_str = parsed.pattern
-    if parsed.fixed_strings:
-        pattern_str = re.escape(pattern_str)
-    if parsed.word_regexp:
-        pattern_str = r"\b" + pattern_str + r"\b"
+    # Build combined regex from all patterns (OR'd together)
+    compiled_parts = []
+    for pat in raw_patterns:
+        p = pat
+        if parsed.fixed_strings:
+            p = re.escape(p)
+        if parsed.word_regexp:
+            p = r"\b" + p + r"\b"
+        compiled_parts.append(p)
 
+    combined = "|".join(f"(?:{p})" for p in compiled_parts)
     try:
-        regex = re.compile(pattern_str, flags)
+        regex = re.compile(combined, flags)
     except re.error as e:
         raise TerminalError(f"grep: invalid regex: {e}")
 
