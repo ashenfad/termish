@@ -352,6 +352,39 @@ class TestTar:
             execute_script(script, fs)
 
 
+class TestTarNoDash:
+    """Test tar traditional no-dash flag form."""
+
+    def test_tar_czf(self, fs):
+        """tar czf should work like tar -czf."""
+        fs.write("/workspace/file.txt", b"hello")
+        script = to_script("tar czf /workspace/archive.tar.gz /workspace/file.txt")
+        execute_script(script, fs)
+        assert fs.exists("/workspace/archive.tar.gz")
+
+    def test_tar_xf(self, fs):
+        """tar xf should work like tar -xf."""
+        # Create archive with a relative-path entry manually
+        buffer = io.BytesIO()
+        with tarfile.open(fileobj=buffer, mode="w") as tf:
+            info = tarfile.TarInfo(name="file.txt")
+            data = b"content"
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+        fs.write("/workspace/archive.tar", buffer.getvalue())
+        execute_script(to_script("tar xf /workspace/archive.tar -C /workspace"), fs)
+        assert fs.exists("/workspace/file.txt")
+
+    def test_tar_tf(self, fs):
+        """tar tf should work like tar -tf."""
+        fs.write("/workspace/file.txt", b"content")
+        execute_script(
+            to_script("tar -cf /workspace/archive.tar /workspace/file.txt"), fs
+        )
+        out = execute_script(to_script("tar tf /workspace/archive.tar"), fs)
+        assert "file.txt" in out
+
+
 class TestZip:
     """Tests for zip command."""
 

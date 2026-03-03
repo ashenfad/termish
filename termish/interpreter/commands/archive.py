@@ -88,6 +88,10 @@ def gunzip(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> No
 
 def tar(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
     """Create or extract tar archives."""
+    # Support traditional no-dash form: tar czf archive.tar.gz → tar -czf archive.tar.gz
+    if args and not args[0].startswith("-") and any(c in args[0] for c in "cxt"):
+        args = ["-" + args[0]] + args[1:]
+
     parser = CommandArgParser(prog="tar", add_help=False)
     parser.add_argument("-c", "--create", action="store_true", help="Create archive")
     parser.add_argument("-x", "--extract", action="store_true", help="Extract archive")
