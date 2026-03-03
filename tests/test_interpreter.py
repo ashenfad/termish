@@ -168,7 +168,7 @@ class TestHeadTailShorthand:
 
 
 # ---------------------------------------------------------------------------
-# ls -h / -t
+# ls -h / -t / -S / -r / -1
 # ---------------------------------------------------------------------------
 
 
@@ -188,6 +188,56 @@ class TestLsFlags:
         b_idx = next(i for i, line in enumerate(lines) if "b.txt" in line)
         a_idx = next(i for i, line in enumerate(lines) if "a.txt" in line)
         assert b_idx < a_idx
+
+    def test_ls_sort_by_size(self, fs):
+        fs.write("/small.txt", b"x")
+        fs.write("/big.txt", b"x" * 1000)
+        fs.write("/medium.txt", b"x" * 100)
+        out = execute_script(to_script("ls -lS /"), fs)
+        lines = [line for line in out.strip().split("\n") if line]
+        big_idx = next(i for i, line in enumerate(lines) if "big.txt" in line)
+        med_idx = next(i for i, line in enumerate(lines) if "medium.txt" in line)
+        sml_idx = next(i for i, line in enumerate(lines) if "small.txt" in line)
+        assert big_idx < med_idx < sml_idx
+
+    def test_ls_sort_by_size_short(self, fs):
+        """ls -S without -l outputs names sorted by size."""
+        fs.write("/small.txt", b"x")
+        fs.write("/big.txt", b"x" * 1000)
+        out = execute_script(to_script("ls -S /"), fs)
+        lines = out.strip().split("\n")
+        big_idx = next(i for i, line in enumerate(lines) if "big.txt" in line)
+        sml_idx = next(i for i, line in enumerate(lines) if "small.txt" in line)
+        assert big_idx < sml_idx
+
+    def test_ls_reverse(self, fs):
+        fs.write("/a.txt", b"a")
+        fs.write("/b.txt", b"b")
+        # Normal order
+        out_normal = execute_script(to_script("ls /"), fs)
+        # Reversed
+        out_rev = execute_script(to_script("ls -r /"), fs)
+        normal_lines = out_normal.strip().split("\n")
+        rev_lines = out_rev.strip().split("\n")
+        assert normal_lines == list(reversed(rev_lines))
+
+    def test_ls_reverse_with_sort(self, fs):
+        """ls -rS reverses size sort (smallest first)."""
+        fs.write("/small.txt", b"x")
+        fs.write("/big.txt", b"x" * 1000)
+        out = execute_script(to_script("ls -lrS /"), fs)
+        lines = [line for line in out.strip().split("\n") if line]
+        sml_idx = next(i for i, line in enumerate(lines) if "small.txt" in line)
+        big_idx = next(i for i, line in enumerate(lines) if "big.txt" in line)
+        assert sml_idx < big_idx
+
+    def test_ls_one_per_line(self, fs):
+        """-1 flag is accepted (output is already one-per-line)."""
+        fs.write("/a.txt", b"a")
+        fs.write("/b.txt", b"b")
+        out = execute_script(to_script("ls -1 /"), fs)
+        lines = out.strip().split("\n")
+        assert len(lines) == 2
 
 
 # ---------------------------------------------------------------------------

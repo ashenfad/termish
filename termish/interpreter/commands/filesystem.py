@@ -76,6 +76,9 @@ def ls(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
     parser.add_argument("-R", action="store_true")
     parser.add_argument("-h", "--human-readable", action="store_true")
     parser.add_argument("-t", action="store_true")
+    parser.add_argument("-S", action="store_true")
+    parser.add_argument("-r", action="store_true")
+    parser.add_argument("-1", dest="one_per_line", action="store_true")
     parser.add_argument("paths", nargs="*", default=["."])
 
     parsed, unknown = parser.parse_known_args(args)
@@ -106,48 +109,48 @@ def ls(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
                     stdout.write(f"{path}\n")
                 continue
 
-            if parsed.l:
+            needs_detailed = parsed.l or parsed.t or parsed.S
+            if needs_detailed:
                 items = fs.list_detailed(path, recursive=parsed.R)
-                if parsed.t:
+                if not parsed.a:
+                    items = [i for i in items if not i.name.startswith(".")]
+                if parsed.S:
+                    items = sorted(items, key=lambda x: x.size, reverse=True)
+                elif parsed.t:
                     items = sorted(
                         items, key=lambda x: x.modified_at or "", reverse=True
                     )
-                for item in items:
-                    if not parsed.a and item.name.startswith("."):
-                        continue
-                    type_char = "d" if item.is_dir else "-"
-                    if parsed.human_readable:
-                        size = _human_readable_size(item.size).rjust(6)
-                    else:
-                        size = str(item.size).rjust(8)
-                    time = (
-                        item.modified_at[:16].replace("T", " ")
-                        if item.modified_at
-                        else " " * 16
-                    )
-                    stdout.write(
-                        f"{type_char}rw-r--r-- 1 agent agent {size} {time} {item.path}\n"
-                    )
-            else:
-                if parsed.t:
-                    items_detailed = fs.list_detailed(path, recursive=parsed.R)
-                    items_detailed = sorted(
-                        items_detailed,
-                        key=lambda x: x.modified_at or "",
-                        reverse=True,
-                    )
-                    filtered = [
-                        item.path
-                        for item in items_detailed
-                        if parsed.a or not item.name.startswith(".")
-                    ]
+                if parsed.r:
+                    items = list(reversed(items))
+
+                if parsed.l:
+                    for item in items:
+                        type_char = "d" if item.is_dir else "-"
+                        if parsed.human_readable:
+                            size = _human_readable_size(item.size).rjust(6)
+                        else:
+                            size = str(item.size).rjust(8)
+                        time = (
+                            item.modified_at[:16].replace("T", " ")
+                            if item.modified_at
+                            else " " * 16
+                        )
+                        stdout.write(
+                            f"{type_char}rw-r--r-- 1 agent agent {size} {time} {item.path}\n"
+                        )
                 else:
-                    items_str = fs.list(path, recursive=parsed.R)
-                    filtered = [
-                        p
-                        for p in items_str
-                        if parsed.a or not p.split("/")[-1].startswith(".")
-                    ]
+                    filtered = [item.path for item in items]
+                    if filtered:
+                        stdout.write("\n".join(filtered) + "\n")
+            else:
+                items_str = fs.list(path, recursive=parsed.R)
+                filtered = [
+                    p
+                    for p in items_str
+                    if parsed.a or not p.split("/")[-1].startswith(".")
+                ]
+                if parsed.r:
+                    filtered = list(reversed(filtered))
                 if filtered:
                     stdout.write("\n".join(filtered) + "\n")
 
