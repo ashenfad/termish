@@ -383,3 +383,51 @@ class TestSedExtendedRegex:
         fs.write("/f.txt", b"cat\ndog\nbird\n")
         out = execute_script(to_script("sed -E 's/cat|dog/pet/' f.txt"), fs)
         assert "pet\npet\nbird\n" == out
+
+
+# ---------------------------------------------------------------------------
+# sed a/i/c/q commands
+# ---------------------------------------------------------------------------
+
+
+class TestSedAppendInsertChange:
+    def test_append_after_line(self, fs):
+        fs.write("/f.txt", b"line1\nline2\nline3\n")
+        out = execute_script(to_script(r"sed '2a\new text' f.txt"), fs)
+        assert out == "line1\nline2\nnew text\nline3\n"
+
+    def test_insert_before_line(self, fs):
+        fs.write("/f.txt", b"line1\nline2\nline3\n")
+        out = execute_script(to_script(r"sed '2i\new text' f.txt"), fs)
+        assert out == "line1\nnew text\nline2\nline3\n"
+
+    def test_change_line(self, fs):
+        fs.write("/f.txt", b"line1\nline2\nline3\n")
+        out = execute_script(to_script(r"sed '2c\replaced' f.txt"), fs)
+        assert out == "line1\nreplaced\nline3\n"
+
+    def test_append_last_line(self, fs):
+        fs.write("/f.txt", b"one\ntwo\n")
+        out = execute_script(to_script(r"sed '$a\end' f.txt"), fs)
+        assert out == "one\ntwo\nend\n"
+
+    def test_insert_first_line(self, fs):
+        fs.write("/f.txt", b"one\ntwo\n")
+        out = execute_script(to_script(r"sed '1i\header' f.txt"), fs)
+        assert out == "header\none\ntwo\n"
+
+
+class TestSedQuit:
+    def test_quit_after_line(self, fs):
+        fs.write("/f.txt", b"line1\nline2\nline3\nline4\n")
+        out = execute_script(to_script("sed '2q' f.txt"), fs)
+        assert out == "line1\nline2\n"
+
+    def test_quit_first_line(self, fs):
+        fs.write("/f.txt", b"line1\nline2\nline3\n")
+        out = execute_script(to_script("sed '1q' f.txt"), fs)
+        assert out == "line1\n"
+
+    def test_quit_from_stdin(self, fs):
+        out = execute_script(to_script("echo 'a\nb\nc\nd' | sed '3q'"), fs)
+        assert out == "a\nb\nc\n"
