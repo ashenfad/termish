@@ -197,6 +197,18 @@ class TestCut:
         output = execute_script(to_script("cut -d ',' -f '1,3' data.txt"), fs)
         assert output.strip() == "a,c"
 
+    def test_cut_tab_delimiter_escape(self, fs):
+        """cut -d'\\t' should interpret \\t as a real tab."""
+        fs.write("/f.txt", b"col1\tcol2\tcol3\n")
+        output = execute_script(to_script("cut -d '\\t' -f 2 f.txt"), fs)
+        assert output.strip() == "col2"
+
+    def test_cut_newline_delimiter_escape(self, fs):
+        """cut -d'\\n' should interpret \\n as a real newline."""
+        fs.write("/f.txt", b"line1\nline2\n")
+        output = execute_script(to_script("cut -d '\\n' -f 1 f.txt"), fs)
+        assert "line1" in output
+
 
 # =============================================================================
 # tee tests

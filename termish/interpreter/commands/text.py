@@ -249,6 +249,9 @@ def cut(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
     if unknown:
         raise TerminalError(f"cut: unknown option: {unknown[0]}")
 
+    # Interpret common escape sequences in delimiter (no $'...' in shell parser)
+    parsed.delimiter = parsed.delimiter.replace("\\t", "\t").replace("\\n", "\n")
+
     # Must specify one of -f, -c, or -b
     if not (parsed.fields or parsed.characters or parsed.bytes):
         raise TerminalError(
