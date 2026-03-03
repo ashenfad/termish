@@ -282,6 +282,21 @@ class TestLsFlags:
         lines = out.strip().split("\n")
         assert len(lines) == 2
 
+    def test_ls_directory_flag(self, fs):
+        """ls -d lists the directory itself, not its contents."""
+        fs.makedirs("/mydir")
+        fs.write("/mydir/f.txt", b"")
+        out = execute_script(to_script("ls -d /mydir"), fs)
+        assert out.strip() == "/mydir"
+        assert "f.txt" not in out
+
+    def test_ls_directory_flag_long(self, fs):
+        """ls -ld shows directory entry in long format."""
+        fs.makedirs("/mydir")
+        out = execute_script(to_script("ls -ld /mydir"), fs)
+        assert out.startswith("d")
+        assert "/mydir" in out
+
 
 # ---------------------------------------------------------------------------
 # diff -r / -i

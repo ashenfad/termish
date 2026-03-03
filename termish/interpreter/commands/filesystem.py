@@ -78,6 +78,7 @@ def ls(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
     parser.add_argument("-t", action="store_true")
     parser.add_argument("-S", action="store_true")
     parser.add_argument("-r", action="store_true")
+    parser.add_argument("-d", "--directory", action="store_true")
     parser.add_argument("-1", dest="one_per_line", action="store_true")
     parser.add_argument("paths", nargs="*", default=["."])
 
@@ -90,6 +91,24 @@ def ls(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
             stdout.write(f"{path}:\n")
 
         try:
+            # -d: list directories themselves, not their contents
+            if parsed.directory and fs.isdir(path):
+                if parsed.l:
+                    meta = fs.stat(path)
+                    if parsed.human_readable:
+                        size = _human_readable_size(meta.size).rjust(6)
+                    else:
+                        size = str(meta.size).rjust(8)
+                    time = (
+                        meta.modified_at[:16].replace("T", " ")
+                        if meta.modified_at
+                        else " " * 16
+                    )
+                    stdout.write(f"drw-r--r-- 1 agent agent {size} {time} {path}\n")
+                else:
+                    stdout.write(f"{path}\n")
+                continue
+
             # Check if it is a file first
             if fs.isfile(path):
                 if parsed.l:
