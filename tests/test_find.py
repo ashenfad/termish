@@ -232,3 +232,63 @@ class TestFindExec:
     def test_exec_empty_command(self, fs):
         with pytest.raises(TerminalError, match="requires a command"):
             execute_script(to_script("find / -exec ';'"), fs)
+
+
+# ---------------------------------------------------------------------------
+# find -iname
+# ---------------------------------------------------------------------------
+
+
+class TestFindIName:
+    def test_iname_matches_case_insensitive(self, fs):
+        fs.write("/README.MD", b"")
+        fs.write("/notes.md", b"")
+        fs.write("/code.py", b"")
+        out = execute_script(to_script("find / -iname '*.md'"), fs)
+        assert "README.MD" in out
+        assert "notes.md" in out
+        assert "code.py" not in out
+
+    def test_iname_with_type(self, fs):
+        fs.makedirs("/Docs")
+        fs.write("/docs.txt", b"")
+        out = execute_script(to_script("find / -iname 'docs*' -type f"), fs)
+        assert "docs.txt" in out
+        assert "/Docs" not in out
+
+
+# ---------------------------------------------------------------------------
+# find -print
+# ---------------------------------------------------------------------------
+
+
+class TestFindPrint:
+    def test_print_explicit(self, fs):
+        fs.write("/a.txt", b"")
+        fs.write("/b.py", b"")
+        out = execute_script(to_script("find / -name '*.txt' -print"), fs)
+        assert "a.txt" in out
+        assert "b.py" not in out
+
+    def test_print_with_exec_suppresses_default(self, fs):
+        """When -print and -exec both exist, only explicit actions run."""
+        fs.write("/f.txt", b"hello\n")
+        out = execute_script(
+            to_script("find / -name 'f.txt' -exec cat '{}' ';'"),
+            fs,
+        )
+        # -exec suppresses default print, so only cat output appears
+        assert "hello" in out
+
+    def test_print_combined_with_or(self, fs):
+        """find / -name '*.md' -print -o -name '*.txt' -print"""
+        fs.write("/a.md", b"")
+        fs.write("/b.txt", b"")
+        fs.write("/c.py", b"")
+        out = execute_script(
+            to_script("find / -name '*.md' -print -o -name '*.txt' -print"),
+            fs,
+        )
+        assert "a.md" in out
+        assert "b.txt" in out
+        assert "c.py" not in out
