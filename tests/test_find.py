@@ -292,3 +292,53 @@ class TestFindPrint:
         assert "a.md" in out
         assert "b.txt" in out
         assert "c.py" not in out
+
+
+# ---------------------------------------------------------------------------
+# find -path
+# ---------------------------------------------------------------------------
+
+
+class TestFindPath:
+    def test_path_match(self, fs):
+        fs.makedirs("/src/test")
+        fs.write("/src/test/test_foo.py", b"")
+        fs.write("/src/main.py", b"")
+        out = execute_script(to_script("find / -path '*/test/*'"), fs)
+        assert "test_foo.py" in out
+        assert "main.py" not in out
+
+    def test_path_with_type(self, fs):
+        fs.makedirs("/a/b")
+        fs.write("/a/b/f.txt", b"")
+        fs.write("/a/g.txt", b"")
+        out = execute_script(to_script("find / -path '*/b/*' -type f"), fs)
+        assert "f.txt" in out
+        assert "g.txt" not in out
+
+
+# ---------------------------------------------------------------------------
+# find -delete
+# ---------------------------------------------------------------------------
+
+
+class TestFindDelete:
+    def test_delete_files(self, fs):
+        fs.write("/a.tmp", b"")
+        fs.write("/b.txt", b"")
+        execute_script(to_script("find / -name '*.tmp' -delete"), fs)
+        assert not fs.exists("/a.tmp")
+        assert fs.exists("/b.txt")
+
+    def test_delete_suppresses_output(self, fs):
+        fs.write("/a.tmp", b"")
+        out = execute_script(to_script("find / -name '*.tmp' -delete"), fs)
+        # -delete is an action, so default printing is suppressed
+        assert out == ""
+
+    def test_delete_empty_dir(self, fs):
+        fs.makedirs("/empty")
+        fs.write("/keep.txt", b"")
+        execute_script(to_script("find / -type d -name 'empty' -delete"), fs)
+        assert not fs.exists("/empty")
+        assert fs.exists("/keep.txt")
