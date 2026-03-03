@@ -433,6 +433,21 @@ class TestDiffContextLines:
         context_lines = [x for x in out.split("\n") if x.startswith(" ")]
         assert len(context_lines) == 0
 
+    def test_diff_b_ignores_space_changes(self, fs):
+        """diff -b should treat runs of whitespace as equivalent."""
+        fs.write("/a.txt", b"hello  world\n")
+        fs.write("/b.txt", b"hello world\n")
+        out = execute_script(to_script("diff -b a.txt b.txt"), fs)
+        assert out == ""
+
+    def test_diff_b_detects_real_changes(self, fs):
+        """diff -b should still detect non-whitespace changes."""
+        fs.write("/a.txt", b"hello  world\n")
+        fs.write("/b.txt", b"hello  earth\n")
+        out = execute_script(to_script("diff -b a.txt b.txt"), fs)
+        assert "world" in out
+        assert "earth" in out
+
 
 # ---------------------------------------------------------------------------
 # basename / dirname
