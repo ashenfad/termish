@@ -60,6 +60,19 @@ class TestWc:
         output = execute_script(to_script("wc empty.txt"), fs)
         assert "0" in output
 
+    def test_max_line_length(self, fs):
+        fs.write("/f.txt", b"short\na longer line\nhi\n")
+        output = execute_script(to_script("wc -L f.txt"), fs)
+        assert "13" in output  # "a longer line" = 13 chars
+
+    def test_max_line_length_only(self, fs):
+        """wc -L should only show max line length, not lines/words/bytes."""
+        fs.write("/f.txt", b"abc\nab\n")
+        output = execute_script(to_script("wc -L f.txt"), fs)
+        parts = output.strip().split()
+        # Should be just the number and filename
+        assert parts[0] == "3"
+
 
 # =============================================================================
 # sort tests
