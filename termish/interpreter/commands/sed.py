@@ -38,7 +38,7 @@ class _SedCommand:
     """A single sed command with its address range."""
 
     address: _AddressRange = field(default_factory=_AddressRange)
-    command: str = ""  # 's', 'p', 'd', 'a', 'i', 'c', 'q'
+    command: str = ""  # 's', 'y', 'p', 'd', 'a', 'i', 'c', 'q'
     # For substitution:
     pattern: re.Pattern[str] | None = None
     replacement: str = ""
@@ -207,6 +207,24 @@ def _parse_single_command(text: str) -> _SedCommand:
             replacement=replacement,
             sub_flags=sub_flags,
         )
+    elif cmd_char == "y":
+        # y/set1/set2/ — transliterate characters
+        if pos >= len(text):
+            raise TerminalError("sed: unterminated 'y' command")
+        delim = text[pos]
+        pos += 1
+        set1, pos = _scan_delimited(text, pos, delim)
+        set2, pos = _scan_delimited(text, pos, delim)
+        if len(set1) != len(set2):
+            raise TerminalError(
+                f"sed: 'y' command sets must be same length ({len(set1)} vs {len(set2)})"
+            )
+        cmd = _SedCommand(
+            address=addr_range,
+            command="y",
+            replacement=set1,  # store set1 in replacement
+            sub_flags=set2,  # store set2 in sub_flags
+        )
     elif cmd_char in ("p", "d", "q"):
         cmd = _SedCommand(address=addr_range, command=cmd_char)
     elif cmd_char in ("a", "i", "c"):
@@ -269,7 +287,7 @@ def _split_script(script: str) -> list[str]:
             i += 1
             continue
 
-        if ch == "s":
+        if ch in ("s", "y"):
             current.append(ch)
             i += 1
             # Next char is the delimiter
@@ -409,6 +427,9 @@ def _process_content(content: str, commands: list[_SedCommand], suppress: bool) 
                 line_content = new_content
                 if num_subs > 0 and "p" in cmd.sub_flags:
                     output_lines.append(line_content + "\n")
+            elif cmd.command == "y":
+                table = str.maketrans(cmd.replacement, cmd.sub_flags)
+                line_content = line_content.translate(table)
             elif cmd.command == "p":
                 output_lines.append(line_content + "\n")
             elif cmd.command == "d":
