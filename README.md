@@ -63,6 +63,10 @@ class FileSystem(Protocol):
     def glob(self, pattern: str) -> list[str]: ...
 ```
 
+## Part of the agex stack
+
+termish provides shell commands for AI agents in [agex](https://github.com/ashenfad/agex), operating over virtual filesystems from [monkeyfs](https://github.com/ashenfad/monkeyfs).
+
 ## Compatible filesystems
 
 [monkeyfs](https://github.com/ashenfad/monkeyfs) `VirtualFS` and `IsolatedFS` both satisfy the termish `FileSystem` protocol and can be passed directly to `execute()`.
