@@ -147,9 +147,18 @@ def _parse_tokens(tokens: list[str], mask_map: dict[str, str]) -> Script:
                 except StopIteration:
                     raise ParseError(f"Expected filename after '{token}'")
 
+                # Check if previous arg was a stderr fd (e.g. "2" in "2>/dev/null").
+                # Only "2" is recognized — higher numbers are regular args.
+                is_stderr = cmd_args and cmd_args[-1] == "2"
+                if is_stderr:
+                    cmd_args.pop()
+
                 # Unmask target filename
                 target = unmask(target)
-                cmd_redirects.append(Redirect(type=token, target=target))  # type: ignore[arg-type]
+                if not is_stderr:
+                    # stdout redirect (or fd 1)
+                    cmd_redirects.append(Redirect(type=token, target=target))  # type: ignore[arg-type]
+                # else: silently discard stderr redirect (e.g. 2>/dev/null)
                 continue
 
             else:
