@@ -237,6 +237,24 @@ class TestFindExec:
         out = execute_script(to_script("find / -type f -exec cat '{}' ';'"), fs)
         assert "data" in out
 
+    def test_exec_batch(self, fs):
+        """find -exec grep -l pattern {} +"""
+        fs.write("/a.py", b"def hello():\n    pass\n")
+        fs.write("/b.py", b"class Foo:\n    pass\n")
+        out = execute_script(
+            to_script("find / -name '*.py' -exec grep -l def '{}' '+'"), fs
+        )
+        assert "a.py" in out
+        assert "b.py" not in out
+
+    def test_exec_batch_all_files(self, fs):
+        """find -exec cat {} + should concatenate all matched files."""
+        fs.write("/a.txt", b"aaa\n")
+        fs.write("/b.txt", b"bbb\n")
+        out = execute_script(to_script("find / -type f -exec cat '{}' '+'"), fs)
+        assert "aaa" in out
+        assert "bbb" in out
+
     def test_exec_missing_semicolon(self, fs):
         with pytest.raises(TerminalError, match="terminating"):
             execute_script(to_script("find / -exec echo '{}' "), fs)
