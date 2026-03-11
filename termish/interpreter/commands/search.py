@@ -464,6 +464,18 @@ class _SizePred(_FindPred):
         return item.size == self.threshold
 
 
+def _shell_join(tokens: list[str]) -> str:
+    """Join tokens into a shell command, quoting any that contain spaces."""
+    parts = []
+    for tok in tokens:
+        if " " in tok or "\t" in tok:
+            # Use single quotes, escaping any existing single quotes
+            parts.append("'" + tok.replace("'", "'\\''") + "'")
+        else:
+            parts.append(tok)
+    return " ".join(parts)
+
+
 class _ExecPred(_FindPred):
     """Run a command for each match (action predicate).
 
@@ -490,7 +502,7 @@ class _ExecPred(_FindPred):
             return True
         # Build command with {} replaced by the item path
         expanded = [tok.replace("{}", item.path) for tok in self.cmd_tokens]
-        cmd_str = " ".join(expanded)
+        cmd_str = _shell_join(expanded)
         try:
             output = self.executor(cmd_str, fs)
             if output:
@@ -498,6 +510,50 @@ class _ExecPred(_FindPred):
         except Exception:
             return False
         return True
+
+
+class _ExecBatchPred(_FindPred):
+    """Batch variant of -exec (terminated by +).
+
+    Collects matched paths and runs a single command with all paths
+    appended where {} appears. The command is executed via finalize().
+    """
+
+    __slots__ = ("cmd_tokens", "stdout", "executor", "collected")
+
+    def __init__(
+        self,
+        cmd_tokens: list[str],
+        stdout: TextIO,
+        executor: Callable[[str, FileSystem], str],
+    ) -> None:
+        self.cmd_tokens = cmd_tokens
+        self.stdout = stdout
+        self.executor = executor
+        self.collected: list[str] = []
+
+    def matches(self, item, fs=None) -> bool:
+        self.collected.append(item.path)
+        return True
+
+    def finalize(self, fs: FileSystem) -> None:
+        """Run the batched command with all collected paths."""
+        if not self.collected:
+            return
+        # Replace {} with the collected paths
+        expanded: list[str] = []
+        for tok in self.cmd_tokens:
+            if tok == "{}":
+                expanded.extend(self.collected)
+            else:
+                expanded.append(tok)
+        cmd_str = _shell_join(expanded)
+        try:
+            output = self.executor(cmd_str, fs)
+            if output:
+                self.stdout.write(output)
+        except Exception:
+            pass
 
 
 class _AndPred(_FindPred):
@@ -541,7 +597,7 @@ class _TruePred(_FindPred):
 
 def _has_action(pred: _FindPred) -> bool:
     """Check if predicate tree contains any action predicates."""
-    if isinstance(pred, (_ExecPred, _PrintPred, _DeletePred)):
+    if isinstance(pred, (_ExecPred, _ExecBatchPred, _PrintPred, _DeletePred)):
         return True
     if isinstance(pred, (_AndPred, _OrPred)):
         return _has_action(pred.left) or _has_action(pred.right)
@@ -677,16 +733,19 @@ def _parse_find_predicates(
         if tok == "-exec":
             pos += 1
             cmd_tokens: list[str] = []
-            while pos < len(tokens) and tokens[pos] != ";":
+            while pos < len(tokens) and tokens[pos] not in (";", "+"):
                 cmd_tokens.append(tokens[pos])
                 pos += 1
             if pos >= len(tokens):
-                raise TerminalError("find: -exec requires terminating ';'")
-            pos += 1  # skip ;
+                raise TerminalError("find: -exec requires terminating ';' or '+'")
+            batch = tokens[pos] == "+"
+            pos += 1  # skip ; or +
             if not cmd_tokens:
                 raise TerminalError("find: -exec requires a command")
             if executor is None:
                 raise TerminalError("find: -exec not available in this context")
+            if batch:
+                return _ExecBatchPred(cmd_tokens, stdout, executor)
             return _ExecPred(cmd_tokens, stdout, executor)
 
         raise TerminalError(f"find: unknown predicate: {tok}")
@@ -698,6 +757,17 @@ def _parse_find_predicates(
     if pos < len(tokens):
         raise TerminalError(f"find: unexpected token: {tokens[pos]}")
     return result
+
+
+def _finalize_batch(pred: _FindPred, fs: FileSystem) -> None:
+    """Walk the predicate tree and finalize any batch -exec + predicates."""
+    if isinstance(pred, _ExecBatchPred):
+        pred.finalize(fs)
+    elif isinstance(pred, (_AndPred, _OrPred)):
+        _finalize_batch(pred.left, fs)
+        _finalize_batch(pred.right, fs)
+    elif isinstance(pred, _NotPred):
+        _finalize_batch(pred.child, fs)
 
 
 def find(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
@@ -794,3 +864,6 @@ def find(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
         # Suppress default path printing when action predicates exist
         if not has_action:
             stdout.write(f"{display}\n")
+
+    # Finalize any batch -exec + predicates
+    _finalize_batch(predicate, fs)
