@@ -21,6 +21,27 @@ def test_grep_recursive(fs):
     assert "src/models.py" not in output
 
 
+def test_grep_recursive_preserves_relative_paths(fs):
+    """grep -r should preserve the user's relative path prefix in output."""
+    execute_script(to_script("mkdir -p chapters/data/events"), fs)
+    execute_script(to_script("echo 'task started' > chapters/data/events/001.md"), fs)
+    execute_script(to_script("echo 'no match' > chapters/data/events/002.md"), fs)
+
+    output = execute_script(to_script("grep -r 'task' chapters/"), fs)
+    assert "chapters/data/events/001.md" in output
+    # Should NOT contain absolute paths
+    assert output.strip().startswith("chapters/")
+
+
+def test_grep_recursive_deep_nesting(fs):
+    """grep -r with deeply nested relative paths should preserve them."""
+    fs.makedirs("/project/src/lib")
+    fs.write("/project/src/lib/util.py", b"hello world")
+    fs.chdir("/project")
+    output = execute_script(to_script("grep -r 'hello' src"), fs)
+    assert "src/lib/util.py" in output
+
+
 def test_grep_file_simple(fs):
     execute_script(to_script("echo 'hello' > hello.txt"), fs)
     output = execute_script(to_script("grep 'hello' hello.txt"), fs)
