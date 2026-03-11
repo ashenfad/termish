@@ -21,6 +21,17 @@ def test_grep_recursive(fs):
     assert "src/models.py" not in output
 
 
+def test_grep_auto_recurse_directory(fs):
+    """grep on a directory without -r should auto-recurse."""
+    execute_script(to_script("mkdir -p src"), fs)
+    execute_script(to_script("echo 'def foo(): pass' > src/main.py"), fs)
+    execute_script(to_script("echo 'class Bar: pass' > src/models.py"), fs)
+
+    output = execute_script(to_script("grep 'def' src"), fs)
+    assert "src/main.py:def foo(): pass" in output
+    assert "src/models.py" not in output
+
+
 def test_grep_recursive_preserves_relative_paths(fs):
     """grep -r should preserve the user's relative path prefix in output."""
     execute_script(to_script("mkdir -p chapters/data/events"), fs)

@@ -240,88 +240,42 @@ class MemoryFS:
         return sorted(entries)
 
     def list_detailed(self, path: str = ".", recursive: bool = False) -> list[FileInfo]:
-        path = self._resolve(path)
-        if path not in self._dirs:
-            raise FileNotFoundError(_errno.ENOENT, "No such directory", path)
-        prefix = path.rstrip("/") + "/"
+        # Use list() to get relative entries, then enrich with metadata.
+        # This keeps FileInfo.path consistent: user_prefix/relative_entry.
+        names = self.list(path, recursive=recursive)
+        resolved = self._resolve(path)
+        user_prefix = path.rstrip("/")
 
-        if recursive:
-            results: list[FileInfo] = []
-            seen: set[str] = set()
-            for f in sorted(self._files):
-                if f.startswith(prefix):
-                    ts = self._timestamps.get(f, ("", ""))
-                    results.append(
-                        FileInfo(
-                            name=posixpath.basename(f),
-                            path=f,
-                            size=len(self._files[f]),
-                            created_at=ts[0],
-                            modified_at=ts[1],
-                            is_dir=False,
-                        )
-                    )
-                    seen.add(f)
-            for d in sorted(self._dirs):
-                if d.startswith(prefix) and d != path and d not in seen:
-                    ts = self._timestamps.get(d, ("", ""))
-                    results.append(
-                        FileInfo(
-                            name=posixpath.basename(d),
-                            path=d,
-                            size=0,
-                            created_at=ts[0],
-                            modified_at=ts[1],
-                            is_dir=True,
-                        )
-                    )
-            return results
-
-        # Non-recursive: direct children only
-        entries: dict[str, FileInfo] = {}
-        for f in self._files:
-            if f.startswith(prefix):
-                rest = f[len(prefix) :]
-                child_name = rest.split("/")[0]
-                if "/" in rest:
-                    # Implicit subdirectory
-                    if child_name not in entries:
-                        child_path = prefix + child_name
-                        ts = self._timestamps.get(child_path, ("", ""))
-                        entries[child_name] = FileInfo(
-                            name=child_name,
-                            path=child_path,
-                            size=0,
-                            created_at=ts[0],
-                            modified_at=ts[1],
-                            is_dir=True,
-                        )
-                else:
-                    ts = self._timestamps.get(f, ("", ""))
-                    entries[child_name] = FileInfo(
-                        name=child_name,
-                        path=f,
-                        size=len(self._files[f]),
-                        created_at=ts[0],
-                        modified_at=ts[1],
-                        is_dir=False,
-                    )
-        for d in self._dirs:
-            if d.startswith(prefix) and d != path:
-                rest = d[len(prefix) :]
-                child_name = rest.split("/")[0]
-                if child_name not in entries:
-                    child_path = prefix + child_name
-                    ts = self._timestamps.get(child_path, ("", ""))
-                    entries[child_name] = FileInfo(
-                        name=child_name,
-                        path=child_path,
+        results: list[FileInfo] = []
+        for name in names:
+            abs_path = resolved.rstrip("/") + "/" + name
+            display = f"{user_prefix}/{name}" if user_prefix != "." else name
+            is_dir = abs_path in self._dirs
+            if is_dir:
+                ts = self._timestamps.get(abs_path, ("", ""))
+                results.append(
+                    FileInfo(
+                        name=posixpath.basename(name),
+                        path=display,
                         size=0,
                         created_at=ts[0],
                         modified_at=ts[1],
                         is_dir=True,
                     )
-        return sorted(entries.values(), key=lambda fi: fi.name)
+                )
+            elif abs_path in self._files:
+                ts = self._timestamps.get(abs_path, ("", ""))
+                results.append(
+                    FileInfo(
+                        name=posixpath.basename(name),
+                        path=display,
+                        size=len(self._files[abs_path]),
+                        created_at=ts[0],
+                        modified_at=ts[1],
+                        is_dir=False,
+                    )
+                )
+        return results
 
     # -- globbing --
 

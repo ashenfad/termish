@@ -12,34 +12,27 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 from termish.errors import TerminalError
-from termish.fs import FileSystem
+from termish.fs import FileInfo, FileSystem
 
 from ._argparse import CommandArgParser
 
 
-def _resolve_path(user_path: str, fs: FileSystem) -> str:
-    """Resolve a user-provided path to absolute using the filesystem's cwd."""
-    if user_path.startswith("/"):
-        return posixpath.normpath(user_path)
-    return posixpath.normpath(fs.getcwd().rstrip("/") + "/" + user_path)
+def _collect_files(user_dir: str, out: list[str], fs: FileSystem) -> None:
+    """Recursively collect file paths under *user_dir*, preserving the user's prefix.
 
-
-def _rebase_path(user_path: str, abs_base: str, abs_file: str) -> str:
-    """Remap an absolute path to preserve the user's original path format.
-
-    Real grep/find preserve the path prefix the user gave them:
-      grep -r pat chapters/  →  chapters/subdir/file.md   (not /abs/chapters/subdir/file.md)
-      grep -r pat /abs/path  →  /abs/path/subdir/file.md
-
-    ``abs_base`` is the resolved absolute form of ``user_path``.
-    ``abs_file`` is the absolute path returned by list_detailed().
+    Uses ``fs.list()`` (which returns paths relative to the queried directory)
+    rather than ``list_detailed()`` whose ``.path`` format varies across FS
+    implementations.
     """
-    # Strip the resolved base from the absolute file path, then prepend user's original
-    base = abs_base.rstrip("/") + "/"
-    if abs_file.startswith(base):
-        relative = abs_file[len(base) :]
-        return user_path.rstrip("/") + "/" + relative
-    return abs_file
+    prefix = user_dir.rstrip("/")
+    try:
+        entries = fs.list(user_dir, recursive=True)
+    except Exception as e:
+        raise TerminalError(f"grep: {user_dir}: {e}")
+    for entry in entries:
+        full = f"{prefix}/{entry}"
+        if not fs.isdir(full):
+            out.append(full)
 
 
 def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
@@ -260,31 +253,12 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
 
     if not parsed.files:
         if parsed.recursive:
-            root = "."
-            abs_root = _resolve_path(root, fs)
-            try:
-                all_files = fs.list_detailed(root, recursive=True)
-                for f in all_files:
-                    if not f.is_dir:
-                        files_to_search.append(_rebase_path(root, abs_root, f.path))
-            except Exception as e:
-                raise TerminalError(f"grep: {e}")
+            _collect_files(".", files_to_search, fs)
     else:
         for path in parsed.files:
             if fs.isdir(path):
-                if parsed.recursive:
-                    abs_base = _resolve_path(path, fs)
-                    try:
-                        all_files = fs.list_detailed(path, recursive=True)
-                        for f in all_files:
-                            if not f.is_dir:
-                                files_to_search.append(
-                                    _rebase_path(path, abs_base, f.path)
-                                )
-                    except Exception as e:
-                        raise TerminalError(f"grep: {path}: {e}")
-                else:
-                    raise TerminalError(f"grep: {path}: Is a directory")
+                # Auto-recurse into directories (matches modern grep behaviour)
+                _collect_files(path, files_to_search, fs)
             else:
                 files_to_search.append(path)
 
@@ -778,35 +752,45 @@ def find(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
     has_action = _has_action(predicate)
 
     try:
-        all_items = fs.list_detailed(root_path, recursive=True)
-
-        # Resolve the root to absolute for rebasing paths
-        abs_root = _resolve_path(root_path, fs)
-        abs_root_prefix = abs_root.rstrip("/") + "/"
-
-        for item in all_items:
-            # Calculate depth relative to root using absolute paths
-            relative = (
-                item.path[len(abs_root_prefix) :]
-                if item.path.startswith(abs_root_prefix)
-                else ""
-            )
-            depth = len(relative.split("/")) if relative else 0
-
-            if maxdepth is not None and depth > maxdepth:
-                continue
-            if mindepth is not None and depth < mindepth:
-                continue
-
-            if not predicate.matches(item, fs):
-                continue
-
-            # Suppress default path printing when action predicates exist
-            if not has_action:
-                display = _rebase_path(root_path, abs_root, item.path)
-                stdout.write(f"{display}\n")
-
-    except TerminalError:
-        raise
+        entries = fs.list(root_path, recursive=True)
     except Exception as e:
         raise TerminalError(f"find: {e}")
+
+    prefix = root_path.rstrip("/")
+
+    for entry in entries:
+        display = f"{prefix}/{entry}"
+        depth = len(entry.split("/"))
+
+        if maxdepth is not None and depth > maxdepth:
+            continue
+        if mindepth is not None and depth < mindepth:
+            continue
+
+        is_dir = fs.isdir(display)
+        try:
+            meta = fs.stat(display)
+            size = meta.size
+        except Exception:
+            size = 0
+
+        item = FileInfo(
+            name=posixpath.basename(entry),
+            path=display,
+            size=size,
+            created_at="",
+            modified_at="",
+            is_dir=is_dir,
+        )
+
+        try:
+            if not predicate.matches(item, fs):
+                continue
+        except TerminalError:
+            raise
+        except Exception:
+            continue
+
+        # Suppress default path printing when action predicates exist
+        if not has_action:
+            stdout.write(f"{display}\n")
