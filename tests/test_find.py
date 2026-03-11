@@ -11,6 +11,18 @@ def fs():
     return MemoryFS()
 
 
+def test_find_preserves_relative_paths(fs):
+    """find should preserve the user's relative path prefix in output."""
+    execute_script(to_script("mkdir -p chapters/data/events"), fs)
+    execute_script(to_script("echo 'x' > chapters/data/events/001.md"), fs)
+
+    output = execute_script(to_script("find chapters/ -name '*.md'"), fs)
+    assert "chapters/data/events/001.md" in output
+    # Should NOT contain absolute paths
+    for line in output.strip().splitlines():
+        assert line.startswith("chapters/"), f"Expected relative path, got: {line}"
+
+
 def test_find_unknown_option(fs):
     """Test that find errors on unknown predicates."""
     with pytest.raises(TerminalError) as excinfo:

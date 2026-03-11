@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fnmatch
 import io
+import posixpath
 import re
 from typing import TYPE_CHECKING, TextIO
 
@@ -14,6 +15,31 @@ from termish.errors import TerminalError
 from termish.fs import FileSystem
 
 from ._argparse import CommandArgParser
+
+
+def _resolve_path(user_path: str, fs: FileSystem) -> str:
+    """Resolve a user-provided path to absolute using the filesystem's cwd."""
+    if user_path.startswith("/"):
+        return posixpath.normpath(user_path)
+    return posixpath.normpath(fs.getcwd().rstrip("/") + "/" + user_path)
+
+
+def _rebase_path(user_path: str, abs_base: str, abs_file: str) -> str:
+    """Remap an absolute path to preserve the user's original path format.
+
+    Real grep/find preserve the path prefix the user gave them:
+      grep -r pat chapters/  →  chapters/subdir/file.md   (not /abs/chapters/subdir/file.md)
+      grep -r pat /abs/path  →  /abs/path/subdir/file.md
+
+    ``abs_base`` is the resolved absolute form of ``user_path``.
+    ``abs_file`` is the absolute path returned by list_detailed().
+    """
+    # Strip the resolved base from the absolute file path, then prepend user's original
+    base = abs_base.rstrip("/") + "/"
+    if abs_file.startswith(base):
+        relative = abs_file[len(base) :]
+        return user_path.rstrip("/") + "/" + relative
+    return abs_file
 
 
 def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
@@ -235,22 +261,26 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
     if not parsed.files:
         if parsed.recursive:
             root = "."
+            abs_root = _resolve_path(root, fs)
             try:
                 all_files = fs.list_detailed(root, recursive=True)
                 for f in all_files:
                     if not f.is_dir:
-                        files_to_search.append(f.path)
+                        files_to_search.append(_rebase_path(root, abs_root, f.path))
             except Exception as e:
                 raise TerminalError(f"grep: {e}")
     else:
         for path in parsed.files:
             if fs.isdir(path):
                 if parsed.recursive:
+                    abs_base = _resolve_path(path, fs)
                     try:
                         all_files = fs.list_detailed(path, recursive=True)
                         for f in all_files:
                             if not f.is_dir:
-                                files_to_search.append(f.path)
+                                files_to_search.append(
+                                    _rebase_path(path, abs_base, f.path)
+                                )
                     except Exception as e:
                         raise TerminalError(f"grep: {path}: {e}")
                 else:
@@ -750,12 +780,17 @@ def find(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
     try:
         all_items = fs.list_detailed(root_path, recursive=True)
 
-        # Calculate base for depth computation
-        root_stripped = root_path.rstrip("/") if root_path != "/" else ""
+        # Resolve the root to absolute for rebasing paths
+        abs_root = _resolve_path(root_path, fs)
+        abs_root_prefix = abs_root.rstrip("/") + "/"
 
         for item in all_items:
-            # Calculate depth relative to root
-            relative = item.path[len(root_stripped) :].lstrip("/")
+            # Calculate depth relative to root using absolute paths
+            relative = (
+                item.path[len(abs_root_prefix) :]
+                if item.path.startswith(abs_root_prefix)
+                else ""
+            )
             depth = len(relative.split("/")) if relative else 0
 
             if maxdepth is not None and depth > maxdepth:
@@ -768,7 +803,8 @@ def find(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
 
             # Suppress default path printing when action predicates exist
             if not has_action:
-                stdout.write(f"{item.path}\n")
+                display = _rebase_path(root_path, abs_root, item.path)
+                stdout.write(f"{display}\n")
 
     except TerminalError:
         raise
