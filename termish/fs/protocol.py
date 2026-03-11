@@ -41,7 +41,7 @@ class FileInfo:
     """
 
     name: str
-    path: str
+    path: str  # queried_dir/relative — e.g. list_detailed("src/").path → "src/lib/util.py"
     size: int
     created_at: str
     modified_at: str
