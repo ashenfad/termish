@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import fnmatch
 import io
-import posixpath
 import re
 from typing import TYPE_CHECKING, TextIO
 
@@ -12,7 +11,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 from termish.errors import TerminalError
-from termish.fs import FileInfo, FileSystem
+from termish.fs import FileSystem
 
 from ._argparse import CommandArgParser
 
@@ -822,36 +821,25 @@ def find(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
     has_action = _has_action(predicate)
 
     try:
-        entries = fs.list(root_path, recursive=True)
+        items = fs.list_detailed(root_path, recursive=True)
     except Exception as e:
         raise TerminalError(f"find: {e}")
 
     prefix = root_path.rstrip("/")
 
-    for entry in entries:
-        display = f"{prefix}/{entry}"
-        depth = len(entry.split("/"))
+    for item in items:
+        # Compute depth from relative path (strip the user-provided prefix)
+        rel = (
+            item.path[len(prefix) + 1 :]
+            if item.path.startswith(prefix + "/")
+            else item.name
+        )
+        depth = len(rel.split("/"))
 
         if maxdepth is not None and depth > maxdepth:
             continue
         if mindepth is not None and depth < mindepth:
             continue
-
-        is_dir = fs.isdir(display)
-        try:
-            meta = fs.stat(display)
-            size = meta.size
-        except Exception:
-            size = 0
-
-        item = FileInfo(
-            name=posixpath.basename(entry),
-            path=display,
-            size=size,
-            created_at="",
-            modified_at="",
-            is_dir=is_dir,
-        )
 
         try:
             if not predicate.matches(item, fs):
@@ -863,7 +851,7 @@ def find(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
 
         # Suppress default path printing when action predicates exist
         if not has_action:
-            stdout.write(f"{display}\n")
+            stdout.write(f"{item.path}\n")
 
     # Finalize any batch -exec + predicates
     _finalize_batch(predicate, fs)
