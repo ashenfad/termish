@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2026-03-12
+
+### Added
+- **find**: `-exec {} +` batch form — accumulates matching paths and runs a single command at the end
+
+### Fixed
+- **find**: use `list_detailed()` instead of `list()` + per-file `stat()`, restoring timestamp metadata and eliminating N+1 calls
+- **grep/find**: portable path handling — use `list()` relative paths with user-provided prefix to produce consistent output across FS implementations
+- **grep -r / find**: preserve user-provided relative paths in output instead of normalizing to absolute
+- **find -exec**: fix space-in-argument quoting for commands with quoted multi-word args
+- **2>/dev/null**: treat stderr redirection as a no-op instead of erroring
+
 ## [0.1.2] - 2026-03-03
 
 ### Added
