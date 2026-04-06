@@ -332,3 +332,44 @@ class TestGrepFilenameControl:
         fs.write("/b.txt", b"hello\n")
         out = execute_script(to_script("grep -h hello a.txt b.txt"), fs)
         assert out == "hello\nhello\n"
+
+
+# ---------------------------------------------------------------------------
+# grep BRE alternation (\|)
+# ---------------------------------------------------------------------------
+
+
+class TestGrepBREAlternation:
+    """BRE-style \\| alternation should work (converted to ERE | internally)."""
+
+    def test_backslash_pipe_alternation(self, fs):
+        fs.write("/f.txt", b"apple\nbanana\ncherry\n")
+        out = execute_script(to_script(r"grep 'apple\|cherry' f.txt"), fs)
+        assert "apple" in out
+        assert "cherry" in out
+        assert "banana" not in out
+
+    def test_backslash_pipe_with_count(self, fs):
+        fs.write("/f.txt", b"apple\nbanana\ncherry\n")
+        out = execute_script(to_script(r"grep -c 'apple\|cherry' f.txt"), fs)
+        assert out.strip() == "2"
+
+    def test_ere_pipe_still_works(self, fs):
+        fs.write("/f.txt", b"apple\nbanana\ncherry\n")
+        out = execute_script(to_script("grep -E 'apple|cherry' f.txt"), fs)
+        assert "apple" in out
+        assert "cherry" in out
+
+    def test_ere_pipe_without_flag(self, fs):
+        """Bare | (ERE style) should also work since Python re is ERE-like."""
+        fs.write("/f.txt", b"apple\nbanana\ncherry\n")
+        out = execute_script(to_script("grep 'apple|cherry' f.txt"), fs)
+        assert "apple" in out
+        assert "cherry" in out
+
+    def test_fixed_strings_no_conversion(self, fs):
+        """With -F, \\| should be treated literally (no alternation)."""
+        fs.write("/f.txt", b"a\\|b\nhello\n")
+        out = execute_script(to_script(r"grep -F 'a\|b' f.txt"), fs)
+        assert "a\\|b" in out
+        assert "hello" not in out
