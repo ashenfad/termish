@@ -98,7 +98,7 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
         p = pat
         if parsed.fixed_strings:
             p = re.escape(p)
-        else:
+        elif not parsed.extended_regexp:
             p = p.replace(r"\|", "|")
         if parsed.word_regexp:
             p = r"\b" + p + r"\b"
