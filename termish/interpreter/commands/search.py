@@ -88,12 +88,18 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
     if parsed.ignore_case:
         flags |= re.IGNORECASE
 
-    # Build combined regex from all patterns (OR'd together)
+    # Build combined regex from all patterns (OR'd together).
+    # Python's re module uses ERE-like syntax (| for alternation), but
+    # agents commonly use BRE-style \| for alternation.  When not in
+    # -F (fixed-string) mode, convert BRE \| to ERE | so both styles
+    # work.  This makes grep "a\|b" and grep -E "a|b" equivalent.
     compiled_parts = []
     for pat in raw_patterns:
         p = pat
         if parsed.fixed_strings:
             p = re.escape(p)
+        else:
+            p = p.replace(r"\|", "|")
         if parsed.word_regexp:
             p = r"\b" + p + r"\b"
         compiled_parts.append(p)
