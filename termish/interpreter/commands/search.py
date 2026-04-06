@@ -35,10 +35,12 @@ def _collect_files(user_dir: str, out: list[str], fs: FileSystem) -> None:
 
 
 def _bre_alternation_to_ere(pattern: str) -> str:
-    r"""Convert BRE ``\|`` to ERE ``|`` outside character classes.
+    r"""Convert a BRE pattern to Python-``re``-compatible ERE.
 
-    Inside ``[...]`` character classes, ``\|`` is a literal backslash +
-    pipe and must not be converted.
+    * Outside ``[...]``: ``\|`` becomes ``|`` (BRE alternation → ERE).
+    * Inside ``[...]``: backslashes are doubled so Python ``re`` treats
+      them as literal (matching GNU grep BRE, where ``\`` is always
+      literal inside a character class).
     """
     result: list[str] = []
     i = 0
@@ -47,15 +49,20 @@ def _bre_alternation_to_ere(pattern: str) -> str:
     while i < n:
         ch = pattern[i]
         if in_class:
-            # Inside [...] — emit verbatim until unescaped ]
-            result.append(ch)
-            if ch == "\\" and i + 1 < n:
-                # Escaped char inside class — emit next char too
+            if ch == "\\":
+                # BRE: \ is literal inside [...].  Emit \\ so Python re
+                # treats it as a literal backslash rather than an escape
+                # prefix.  The character after \ is emitted normally on
+                # the next iteration.
+                result.append("\\\\")
                 i += 1
-                result.append(pattern[i])
             elif ch == "]":
                 in_class = False
-            i += 1
+                result.append(ch)
+                i += 1
+            else:
+                result.append(ch)
+                i += 1
         else:
             if ch == "\\" and i + 1 < n:
                 if pattern[i + 1] == "|":
