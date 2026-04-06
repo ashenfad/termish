@@ -374,6 +374,25 @@ class TestGrepBREAlternation:
         assert "a|b" in out
         assert "hello" not in out
 
+    def test_backslash_pipe_inside_char_class_preserved(self, fs):
+        r"""[\|] inside a char class should NOT be converted to [|].
+        Python re treats [\|] as matching | (backslash is a no-op escape
+        for | inside a class).  The key thing: our conversion doesn't
+        corrupt it into bare alternation."""
+        fs.write("/f.txt", b"a|b\nhello\n")
+        out = execute_script(to_script(r"grep '[\|]' f.txt"), fs)
+        assert "a|b" in out
+        assert "hello" not in out
+
+    def test_mixed_class_and_alternation(self, fs):
+        r"""[\|] inside class + \| outside should both work correctly.
+        The class matches |, the outer \| is alternation."""
+        fs.write("/f.txt", b"a|b\nfoo\nbar\nhello\n")
+        out = execute_script(to_script(r"grep '[\|]\|bar' f.txt"), fs)
+        assert "a|b" in out
+        assert "bar" in out
+        assert "hello" not in out
+
     def test_fixed_strings_no_conversion(self, fs):
         """With -F, \\| should be treated literally (no alternation)."""
         fs.write("/f.txt", b"a\\|b\nhello\n")

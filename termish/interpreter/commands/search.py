@@ -34,6 +34,54 @@ def _collect_files(user_dir: str, out: list[str], fs: FileSystem) -> None:
             out.append(full)
 
 
+def _bre_alternation_to_ere(pattern: str) -> str:
+    r"""Convert BRE ``\|`` to ERE ``|`` outside character classes.
+
+    Inside ``[...]`` character classes, ``\|`` is a literal backslash +
+    pipe and must not be converted.
+    """
+    result: list[str] = []
+    i = 0
+    in_class = False
+    n = len(pattern)
+    while i < n:
+        ch = pattern[i]
+        if in_class:
+            # Inside [...] — emit verbatim until unescaped ]
+            result.append(ch)
+            if ch == "\\" and i + 1 < n:
+                # Escaped char inside class — emit next char too
+                i += 1
+                result.append(pattern[i])
+            elif ch == "]":
+                in_class = False
+            i += 1
+        else:
+            if ch == "\\" and i + 1 < n:
+                if pattern[i + 1] == "|":
+                    result.append("|")  # BRE \| → ERE |
+                    i += 2
+                else:
+                    result.append(pattern[i : i + 2])
+                    i += 2
+            elif ch == "[":
+                in_class = True
+                result.append("[")
+                i += 1
+                # [^ negation
+                if i < n and pattern[i] == "^":
+                    result.append("^")
+                    i += 1
+                # ] immediately after [ or [^ is a literal ]
+                if i < n and pattern[i] == "]":
+                    result.append("]")
+                    i += 1
+            else:
+                result.append(ch)
+                i += 1
+    return "".join(result)
+
+
 def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
     """Print lines that match patterns."""
     parser = CommandArgParser(prog="grep", add_help=False)
@@ -91,15 +139,15 @@ def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
     # Build combined regex from all patterns (OR'd together).
     # Python's re module uses ERE-like syntax (| for alternation), but
     # agents commonly use BRE-style \| for alternation.  When not in
-    # -F (fixed-string) mode, convert BRE \| to ERE | so both styles
-    # work.  This makes grep "a\|b" and grep -E "a|b" equivalent.
+    # -F (fixed-string) or -E mode, convert BRE \| to ERE | so both
+    # styles work.  This makes grep "a\|b" and grep -E "a|b" equivalent.
     compiled_parts = []
     for pat in raw_patterns:
         p = pat
         if parsed.fixed_strings:
             p = re.escape(p)
         elif not parsed.extended_regexp:
-            p = p.replace(r"\|", "|")
+            p = _bre_alternation_to_ere(p)
         if parsed.word_regexp:
             p = r"\b" + p + r"\b"
         compiled_parts.append(p)
