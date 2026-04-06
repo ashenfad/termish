@@ -367,6 +367,13 @@ class TestGrepBREAlternation:
         assert "apple" in out
         assert "cherry" in out
 
+    def test_ere_backslash_pipe_is_literal(self, fs):
+        """With -E, \\| should match a literal pipe (ERE semantics)."""
+        fs.write("/f.txt", b"a|b\nhello\n")
+        out = execute_script(to_script(r"grep -E 'a\|b' f.txt"), fs)
+        assert "a|b" in out
+        assert "hello" not in out
+
     def test_fixed_strings_no_conversion(self, fs):
         """With -F, \\| should be treated literally (no alternation)."""
         fs.write("/f.txt", b"a\\|b\nhello\n")
