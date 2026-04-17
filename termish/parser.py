@@ -53,6 +53,12 @@ def to_script(text: str) -> Script:
     # punctuation_chars=True ensures "ls|grep" becomes ["ls", "|", "grep"]
     lexer = shlex.shlex(masked_text, posix=True, punctuation_chars=True)
 
+    # shlex with punctuation_chars=True has a narrow wordchars set that
+    # excludes several characters which are NOT shell operators and should
+    # be treated as part of words.  Without this, "user@host" splits into
+    # ["user", "@", "host"], "100%" into ["100", "%"], etc.
+    lexer.wordchars += ":@,%+!^"
+
     # Treat newlines as tokens, not whitespace, so we can use them as separators
     lexer.whitespace = " \t\r"
 
