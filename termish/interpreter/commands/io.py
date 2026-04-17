@@ -2,16 +2,15 @@
 I/O commands for the terminal interpreter.
 """
 
-from typing import TextIO
-
+from termish.context import CommandContext, CommandResult
 from termish.errors import TerminalError
-from termish.fs import FileSystem
 
 from ._argparse import CommandArgParser
 
 
-def echo(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
+def echo(ctx: CommandContext) -> CommandResult | None:
     """Echo arguments to stdout."""
+    args, _stdin, stdout, _fs = ctx.args, ctx.stdin, ctx.stdout, ctx.fs
     # Manual flag parsing: echo treats unknown flags as literal text
     newline = True
     interpret_escapes = False
@@ -60,8 +59,9 @@ def echo(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
     stdout.write(text + ("\n" if newline else ""))
 
 
-def cat(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
+def cat(ctx: CommandContext) -> CommandResult | None:
     """Concatenate files and print on the standard output."""
+    args, stdin, stdout, fs = ctx.args, ctx.stdin, ctx.stdout, ctx.fs
     parser = CommandArgParser(prog="cat", add_help=False)
     parser.add_argument(
         "-A", "--show-all", action="store_true", help="equivalent to -eT"
@@ -151,8 +151,9 @@ def cat(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
             raise TerminalError(f"cat: {path}: {e}")
 
 
-def head(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
+def head(ctx: CommandContext) -> CommandResult | None:
     """Output the first part of files."""
+    args, stdin, stdout, fs = ctx.args, ctx.stdin, ctx.stdout, ctx.fs
     # Pre-process: rewrite -N shorthand to -n N
     processed_args = list(args)
     if (
@@ -208,8 +209,9 @@ def head(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
             stdout.write("\n")
 
 
-def tail(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
+def tail(ctx: CommandContext) -> CommandResult | None:
     """Output the last part of files."""
+    args, stdin, stdout, fs = ctx.args, ctx.stdin, ctx.stdout, ctx.fs
     # Pre-process: rewrite -N shorthand to -n N
     processed_args = list(args)
     if (
@@ -294,8 +296,9 @@ def tail(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
             stdout.write("\n")
 
 
-def tee(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
+def tee(ctx: CommandContext) -> CommandResult | None:
     """Read from stdin and write to stdout and files."""
+    args, stdin, stdout, fs = ctx.args, ctx.stdin, ctx.stdout, ctx.fs
     parser = CommandArgParser(prog="tee", add_help=False)
     parser.add_argument("-a", "--append", action="store_true")
     parser.add_argument("files", nargs="*")

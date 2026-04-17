@@ -2,16 +2,15 @@
 Text processing commands for the terminal interpreter.
 """
 
-from typing import TextIO
-
+from termish.context import CommandContext, CommandResult
 from termish.errors import TerminalError
-from termish.fs import FileSystem
 
 from ._argparse import CommandArgParser
 
 
-def wc(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
+def wc(ctx: CommandContext) -> CommandResult | None:
     """Word, line, character, and byte count."""
+    args, stdin, stdout, fs = ctx.args, ctx.stdin, ctx.stdout, ctx.fs
     parser = CommandArgParser(prog="wc", add_help=False)
     parser.add_argument("-l", "--lines", action="store_true")
     parser.add_argument("-w", "--words", action="store_true")
@@ -93,8 +92,9 @@ def wc(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
         stdout.write(format_line(totals, "total") + "\n")
 
 
-def sort(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
+def sort(ctx: CommandContext) -> CommandResult | None:
     """Sort lines of text."""
+    args, stdin, stdout, fs = ctx.args, ctx.stdin, ctx.stdout, ctx.fs
     parser = CommandArgParser(prog="sort", add_help=False)
     parser.add_argument("-r", "--reverse", action="store_true")
     parser.add_argument("-n", "--numeric-sort", action="store_true")
@@ -181,8 +181,9 @@ def sort(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
         stdout.write(line + "\n")
 
 
-def uniq(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
+def uniq(ctx: CommandContext) -> CommandResult | None:
     """Report or omit repeated lines."""
+    args, stdin, stdout, fs = ctx.args, ctx.stdin, ctx.stdout, ctx.fs
     parser = CommandArgParser(prog="uniq", add_help=False)
     parser.add_argument("-c", "--count", action="store_true")
     parser.add_argument("-d", "--repeated", action="store_true")
@@ -245,8 +246,9 @@ def uniq(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
             stdout.write(line + "\n")
 
 
-def cut(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
+def cut(ctx: CommandContext) -> CommandResult | None:
     """Remove sections from each line of files."""
+    args, stdin, stdout, fs = ctx.args, ctx.stdin, ctx.stdout, ctx.fs
     parser = CommandArgParser(prog="cut", add_help=False)
     parser.add_argument("-d", "--delimiter", type=str, default="\t")
     parser.add_argument("-f", "--fields", type=str, default=None)
@@ -425,8 +427,9 @@ def _expand_tr_set(s: str) -> str:
     return "".join(result)
 
 
-def tr(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
+def tr(ctx: CommandContext) -> CommandResult | None:
     """Translate or delete characters."""
+    args, stdin, stdout, _fs = ctx.args, ctx.stdin, ctx.stdout, ctx.fs
     delete = False
     squeeze = False
     complement = False

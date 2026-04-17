@@ -4,10 +4,9 @@ Stream editor for filtering and transforming text.
 
 import re
 from dataclasses import dataclass, field
-from typing import TextIO
 
+from termish.context import CommandContext, CommandResult
 from termish.errors import TerminalError
-from termish.fs import FileSystem
 
 from ._argparse import CommandArgParser
 
@@ -472,8 +471,9 @@ def _process_content(content: str, commands: list[_SedCommand], suppress: bool) 
 # ---------------------------------------------------------------------------
 
 
-def sed(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
+def sed(ctx: CommandContext) -> CommandResult | None:
     """Stream editor for filtering and transforming text."""
+    args, stdin, stdout, fs = ctx.args, ctx.stdin, ctx.stdout, ctx.fs
     parser = CommandArgParser(prog="sed", add_help=False)
     parser.add_argument("-n", "--quiet", "--silent", action="store_true")
     parser.add_argument("-i", "--in-place", action="store_true")

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable, TextIO
+from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
-    from .fs.protocol import FileSystem
+    from .context import CommandContext, CommandResult
 
 
 class TerminalError(Exception):
@@ -18,6 +18,7 @@ class TerminalError(Exception):
 
 
 # Command function signature:
-# func(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
-# Raises TerminalError on failure.
-CommandFunc = Callable[[list[str], TextIO, TextIO, "FileSystem"], None]
+# func(ctx: CommandContext) -> CommandResult | None
+# Write output to ctx.stdout.  Raise TerminalError on failure.
+# Return None for success, or a CommandResult for exit_code / stderr.
+CommandFunc = Callable[["CommandContext"], "CommandResult | None"]
