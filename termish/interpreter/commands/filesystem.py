@@ -3,8 +3,8 @@ Filesystem commands for the terminal interpreter.
 """
 
 import posixpath
-from typing import TextIO
 
+from termish.context import CommandContext, CommandResult
 from termish.errors import TerminalError
 from termish.fs import FileSystem
 
@@ -12,13 +12,15 @@ from ._argparse import CommandArgParser
 from ._util import resolve_path
 
 
-def pwd(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
+def pwd(ctx: CommandContext) -> CommandResult | None:
     """Print working directory."""
+    _args, _stdin, stdout, fs = ctx.args, ctx.stdin, ctx.stdout, ctx.fs
     stdout.write(fs.getcwd() + "\n")
 
 
-def cd(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
+def cd(ctx: CommandContext) -> CommandResult | None:
     """Change directory."""
+    args, _stdin, _stdout, fs = ctx.args, ctx.stdin, ctx.stdout, ctx.fs
     if not args:
         path = "/"
     else:
@@ -34,8 +36,9 @@ def cd(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
         raise TerminalError(f"cd: {e}")
 
 
-def mkdir(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
+def mkdir(ctx: CommandContext) -> CommandResult | None:
     """Make directories."""
+    args, _stdin, _stdout, fs = ctx.args, ctx.stdin, ctx.stdout, ctx.fs
     parser = CommandArgParser(prog="mkdir", add_help=False)
     parser.add_argument("-p", "--parents", action="store_true")
     parser.add_argument("paths", nargs="+")
@@ -68,8 +71,9 @@ def _human_readable_size(size: int) -> str:
     return f"{fsize:.1f}P"
 
 
-def ls(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
+def ls(ctx: CommandContext) -> CommandResult | None:
     """List directory contents."""
+    args, _stdin, stdout, fs = ctx.args, ctx.stdin, ctx.stdout, ctx.fs
     parser = CommandArgParser(prog="ls", add_help=False)
     parser.add_argument("-l", action="store_true")
     parser.add_argument("-a", action="store_true")
@@ -191,8 +195,9 @@ def ls(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
             stdout.write("\n")
 
 
-def touch(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
+def touch(ctx: CommandContext) -> CommandResult | None:
     """Update timestamps or create empty files."""
+    args, _stdin, _stdout, fs = ctx.args, ctx.stdin, ctx.stdout, ctx.fs
     parser = CommandArgParser(prog="touch", add_help=False)
     parser.add_argument("-c", "--no-create", action="store_true")
     parser.add_argument("files", nargs="*")
@@ -233,8 +238,9 @@ def _copy_recursive(src: str, dst: str, fs: FileSystem) -> None:
             fs.write(dst_path, content)
 
 
-def cp(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
+def cp(ctx: CommandContext) -> CommandResult | None:
     """Copy files."""
+    args, _stdin, _stdout, fs = ctx.args, ctx.stdin, ctx.stdout, ctx.fs
     parser = CommandArgParser(prog="cp", add_help=False)
     parser.add_argument("-r", "-R", action="store_true")
     parser.add_argument("-a", "--archive", action="store_true")
@@ -298,8 +304,9 @@ def cp(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
             raise TerminalError(f"cp: {e}")
 
 
-def mv(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
+def mv(ctx: CommandContext) -> CommandResult | None:
     """Move files."""
+    args, _stdin, _stdout, fs = ctx.args, ctx.stdin, ctx.stdout, ctx.fs
     parser = CommandArgParser(prog="mv", add_help=False)
     parser.add_argument("-f", "--force", action="store_true")
     parser.add_argument("-n", "--no-clobber", action="store_true")
@@ -340,8 +347,9 @@ def _remove_recursive(path: str, fs: FileSystem) -> None:
     fs.rmdir(path)
 
 
-def rm(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
+def rm(ctx: CommandContext) -> CommandResult | None:
     """Remove files."""
+    args, _stdin, _stdout, fs = ctx.args, ctx.stdin, ctx.stdout, ctx.fs
     parser = CommandArgParser(prog="rm", add_help=False)
     parser.add_argument("-r", "-R", action="store_true")
     parser.add_argument("-f", "--force", action="store_true")
@@ -378,8 +386,9 @@ def rm(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
             raise TerminalError(f"rm: {path}: {e}")
 
 
-def basename(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
+def basename(ctx: CommandContext) -> CommandResult | None:
     """Strip directory and suffix from filenames."""
+    args, _stdin, stdout, _fs = ctx.args, ctx.stdin, ctx.stdout, ctx.fs
     if not args:
         raise TerminalError("basename: missing operand")
     path = args[0]
@@ -391,8 +400,9 @@ def basename(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> 
     stdout.write(name + "\n")
 
 
-def dirname(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
+def dirname(ctx: CommandContext) -> CommandResult | None:
     """Strip last component from file name."""
+    args, _stdin, stdout, _fs = ctx.args, ctx.stdin, ctx.stdout, ctx.fs
     if not args:
         raise TerminalError("dirname: missing operand")
     path = args[0]

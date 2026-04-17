@@ -4,10 +4,10 @@ Meta commands that invoke other commands.
 
 import contextvars
 import io
-from typing import TYPE_CHECKING, TextIO
+from typing import TYPE_CHECKING
 
+from termish.context import CommandContext, CommandResult
 from termish.errors import TerminalError
-from termish.fs import FileSystem
 
 _MAX_XARGS_DEPTH = 16
 _xargs_depth: contextvars.ContextVar[int] = contextvars.ContextVar(
@@ -15,7 +15,7 @@ _xargs_depth: contextvars.ContextVar[int] = contextvars.ContextVar(
 )
 
 if TYPE_CHECKING:
-    from termish.errors import CommandFunc
+    pass
 
 
 def _parse_xargs_args(
@@ -68,8 +68,9 @@ def _parse_xargs_args(
     return replace, max_args, null, verbose, "echo", []
 
 
-def xargs(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
+def xargs(ctx: CommandContext) -> CommandResult | None:
     """Build and execute commands from standard input."""
+    args, stdin, stdout, fs = ctx.args, ctx.stdin, ctx.stdout, ctx.fs
     depth = _xargs_depth.get()
 
     if depth >= _MAX_XARGS_DEPTH:
@@ -79,13 +80,13 @@ def xargs(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> Non
 
     replace, max_args, null, verbose, cmd_name, cmd_base_args = _parse_xargs_args(args)
 
-    # Import BUILTINS here to avoid circular import
-    from termish.interpreter.core import BUILTINS
+    # Import the resolved command table here to avoid circular import.
+    # _resolve_command returns the merged (injected-over-builtins) handler.
+    from termish.interpreter.core import _resolve_command
 
-    if cmd_name not in BUILTINS:
+    cmd_func = _resolve_command(cmd_name)
+    if cmd_func is None:
         raise TerminalError(f"xargs: {cmd_name}: command not found")
-
-    cmd_func: "CommandFunc" = BUILTINS[cmd_name]
 
     # Read and split input
     input_text = stdin.read()
@@ -111,7 +112,16 @@ def xargs(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> Non
         cmd_stdout = io.StringIO()
         token = _xargs_depth.set(depth + 1)
         try:
-            cmd_func(cmd_args, cmd_stdin, cmd_stdout, fs)
+            sub_ctx = CommandContext(
+                args=cmd_args, stdin=cmd_stdin, stdout=cmd_stdout, fs=fs
+            )
+            result = cmd_func(sub_ctx)
+            if result and result.exit_code != 0:
+                raise TerminalError(
+                    f"{cmd_name}: {result.stderr}"
+                    if result.stderr
+                    else f"{cmd_name}: exited with code {result.exit_code}"
+                )
         finally:
             _xargs_depth.reset(token)
         stdout.write(cmd_stdout.getvalue())

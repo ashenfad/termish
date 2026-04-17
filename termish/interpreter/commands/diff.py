@@ -6,6 +6,7 @@ import difflib
 import re
 from typing import TextIO
 
+from termish.context import CommandContext, CommandResult
 from termish.errors import TerminalError
 from termish.fs import FileSystem
 
@@ -137,8 +138,9 @@ def _diff_recursive(parsed, fs: FileSystem, stdout: TextIO) -> None:
             _diff_pair(path1, path2, parsed, fs, stdout)
 
 
-def diff(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
+def diff(ctx: CommandContext) -> CommandResult | None:
     """Compare files line by line."""
+    args, _stdin, stdout, fs = ctx.args, ctx.stdin, ctx.stdout, ctx.fs
     parser = CommandArgParser(prog="diff", add_help=False)
     parser.add_argument("-u", "--unified", action="store_true")
     parser.add_argument("-U", "--unified-context", type=int, default=3)

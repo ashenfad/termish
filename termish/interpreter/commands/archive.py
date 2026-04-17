@@ -12,14 +12,16 @@ import tarfile
 import zipfile
 from typing import TextIO
 
+from termish.context import CommandContext, CommandResult
 from termish.errors import TerminalError
 from termish.fs import FileSystem
 
 from ._argparse import CommandArgParser
 
 
-def gzip(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
+def gzip(ctx: CommandContext) -> CommandResult | None:
     """Compress files using gzip."""
+    args, _stdin, stdout, fs = ctx.args, ctx.stdin, ctx.stdout, ctx.fs
     # Pre-process: extract compression level flags (-1 through -9)
     compress_level = 9
     filtered_args: list[str] = []
@@ -96,14 +98,19 @@ def gzip(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None
             raise TerminalError(f"gzip: {path}: Is a directory")
 
 
-def gunzip(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
+def gunzip(ctx: CommandContext) -> CommandResult | None:
     """Decompress gzip files. Equivalent to gzip -d."""
     # gunzip is just gzip with -d prepended
-    gzip(["-d"] + args, stdin, stdout, fs)
+    return gzip(
+        CommandContext(
+            args=["-d"] + ctx.args, stdin=ctx.stdin, stdout=ctx.stdout, fs=ctx.fs
+        )
+    )
 
 
-def tar(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
+def tar(ctx: CommandContext) -> CommandResult | None:
     """Create or extract tar archives."""
+    args, _stdin, stdout, fs = ctx.args, ctx.stdin, ctx.stdout, ctx.fs
     # Support traditional no-dash form: tar czf archive.tar.gz → tar -czf archive.tar.gz
     if args and not args[0].startswith("-") and any(c in args[0] for c in "cxt"):
         args = ["-" + args[0]] + args[1:]
@@ -302,8 +309,9 @@ def _tar_list(
         raise TerminalError(f"tar: error reading archive: {e}")
 
 
-def zip_cmd(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
+def zip_cmd(ctx: CommandContext) -> CommandResult | None:
     """Create zip archives."""
+    args, _stdin, _stdout, fs = ctx.args, ctx.stdin, ctx.stdout, ctx.fs
     parser = CommandArgParser(prog="zip", add_help=False)
     parser.add_argument(
         "-r", "--recurse-paths", action="store_true", help="Recurse into directories"
@@ -365,8 +373,9 @@ def _add_to_zip(
         zf.writestr(arcname, content)
 
 
-def unzip(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
+def unzip(ctx: CommandContext) -> CommandResult | None:
     """Extract zip archives."""
+    args, _stdin, stdout, fs = ctx.args, ctx.stdin, ctx.stdout, ctx.fs
     parser = CommandArgParser(prog="unzip", add_help=False)
     parser.add_argument(
         "-l", "--list", action="store_true", help="List archive contents"

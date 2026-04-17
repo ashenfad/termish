@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, TextIO
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+from termish.context import CommandContext, CommandResult
 from termish.errors import TerminalError
 from termish.fs import FileSystem
 
@@ -89,8 +90,9 @@ def _bre_alternation_to_ere(pattern: str) -> str:
     return "".join(result)
 
 
-def grep(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
+def grep(ctx: CommandContext) -> CommandResult | None:
     """Print lines that match patterns."""
+    args, stdin, stdout, fs = ctx.args, ctx.stdin, ctx.stdout, ctx.fs
     parser = CommandArgParser(prog="grep", add_help=False)
     parser.add_argument("-i", "--ignore-case", action="store_true")
     parser.add_argument("-n", "--line-number", action="store_true")
@@ -830,8 +832,9 @@ def _finalize_batch(pred: _FindPred, fs: FileSystem) -> None:
         _finalize_batch(pred.child, fs)
 
 
-def find(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
+def find(ctx: CommandContext) -> CommandResult | None:
     """Search for files in a directory hierarchy."""
+    args, _stdin, stdout, fs = ctx.args, ctx.stdin, ctx.stdout, ctx.fs
     # Separate path, global options (-maxdepth, -mindepth), and predicates.
     # We can't use argparse because predicate tokens like -o look like flags.
     root_path = "."

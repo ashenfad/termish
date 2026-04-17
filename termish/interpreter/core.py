@@ -3,10 +3,13 @@ Core interpreter logic for executing terminal scripts against a FileSystem.
 Functional implementation.
 """
 
+import contextvars
 import io
+from collections.abc import Mapping
 from typing import TextIO
 
 from termish.ast import Pipeline, Script
+from termish.context import CommandContext
 from termish.errors import CommandFunc, TerminalError
 from termish.fs import FileSystem
 from termish.quote_masker import mask_quotes, unmask_and_unquote
@@ -17,6 +20,22 @@ from .commands import io as io_cmds
 from .commands import jq as jq_cmd
 from .commands import sed as sed_cmd
 from .commands._util import resolve_path
+
+# Context var holding injected commands for the current execution.
+# Set by execute_script() so that meta-commands like xargs can resolve
+# injected commands without threading a parameter through every call.
+_injected_commands: contextvars.ContextVar[Mapping[str, CommandFunc]] = (
+    contextvars.ContextVar("_injected_commands", default={})
+)
+
+
+def _resolve_command(name: str) -> CommandFunc | None:
+    """Look up a command by name: injected commands override built-ins."""
+    injected = _injected_commands.get()
+    if name in injected:
+        return injected[name]
+    return BUILTINS.get(name)
+
 
 # Static mapping of built-in commands
 BUILTINS: dict[str, CommandFunc] = {
@@ -62,7 +81,11 @@ BUILTINS: dict[str, CommandFunc] = {
 }
 
 
-def execute_script(script: Script, fs: FileSystem) -> str:
+def execute_script(
+    script: Script,
+    fs: FileSystem,
+    commands: Mapping[str, CommandFunc] | None = None,
+) -> str:
     """
     Execute a full script and return the final stdout.
 
@@ -74,6 +97,9 @@ def execute_script(script: Script, fs: FileSystem) -> str:
     Args:
         script: The parsed AST.
         fs: The filesystem to operate on.
+        commands: Optional mapping of injected command handlers.
+            Injected commands override built-ins when names collide.
+            Defaults to no injected commands.
 
     Returns:
         Captured stdout as a string.
@@ -81,6 +107,15 @@ def execute_script(script: Script, fs: FileSystem) -> str:
     Raises:
         TerminalError: If the last executed pipeline failed (contains partial output).
     """
+    token = _injected_commands.set(commands or {})
+    try:
+        return _execute_script_inner(script, fs)
+    finally:
+        _injected_commands.reset(token)
+
+
+def _execute_script_inner(script: Script, fs: FileSystem) -> str:
+    """Inner execution loop (injected commands already set via context var)."""
     final_output = io.StringIO()
     last_succeeded = True
     last_error: TerminalError | None = None
@@ -140,10 +175,20 @@ def _execute_pipeline(pipeline: Pipeline, fs: FileSystem, stdout: TextIO):
         # Prepare Args
         expanded_args = _expand_args(cmd_node.args, fs)
 
-        # Execute Command
-        if cmd_node.name in BUILTINS:
+        # Execute Command — injected commands override built-ins
+        cmd_func = _resolve_command(cmd_node.name)
+        if cmd_func is not None:
             try:
-                BUILTINS[cmd_node.name](expanded_args, cmd_stdin, cmd_stdout, fs)
+                ctx = CommandContext(
+                    args=expanded_args, stdin=cmd_stdin, stdout=cmd_stdout, fs=fs
+                )
+                result = cmd_func(ctx)
+                if result is not None and result.exit_code != 0:
+                    raise TerminalError(
+                        f"{cmd_node.name}: {result.stderr}"
+                        if result.stderr
+                        else f"{cmd_node.name}: exited with code {result.exit_code}"
+                    )
             except TerminalError:
                 raise
             except Exception as e:

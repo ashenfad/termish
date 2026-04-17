@@ -3,14 +3,14 @@
 import json
 from typing import TextIO
 
+from termish.context import CommandContext, CommandResult
 from termish.errors import TerminalError
-from termish.fs import FileSystem
 from termish.jq import JqError, ParseError, evaluate, parse_filter
 
 from ._argparse import CommandArgParser
 
 
-def jq(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
+def jq(ctx: CommandContext) -> CommandResult | None:
     """Process JSON with jq-like expressions.
 
     Usage:
@@ -24,6 +24,7 @@ def jq(args: list[str], stdin: TextIO, stdout: TextIO, fs: FileSystem) -> None:
         -n, --null-input    Don't read input, use null
         -j, --join-output   No newline after each output
     """
+    args, stdin, stdout, fs = ctx.args, ctx.stdin, ctx.stdout, ctx.fs
     parser = CommandArgParser(prog="jq", add_help=False)
     parser.add_argument("-r", "--raw-output", action="store_true")
     parser.add_argument("-c", "--compact", action="store_true")
