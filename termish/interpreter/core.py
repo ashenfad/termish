@@ -107,7 +107,12 @@ def execute_script(
     Raises:
         TerminalError: If the last executed pipeline failed (contains partial output).
     """
-    token = _injected_commands.set(commands or {})
+    # Only set the context var if commands is explicitly provided.
+    # When None, nested calls inherit the parent's injected commands.
+    if commands is None:
+        return _execute_script_inner(script, fs)
+
+    token = _injected_commands.set(commands)
     try:
         return _execute_script_inner(script, fs)
     finally:
