@@ -13,9 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`CommandFunc`** type alias updated to `Callable[[CommandContext], CommandResult | None]`.
 - New exports: `CommandContext`, `CommandResult`, `CommandFunc`.
 
+### Breaking Changes
+- **`CommandFunc` signature changed** from `(args, stdin, stdout, fs) -> None` to `(CommandContext) -> CommandResult | None`. Code that defines functions matching the old 4-argument signature must update to accept a `CommandContext`.
+- **All 30 builtin commands refactored** to the new `CommandContext` signature.
+
 ### Changed
-- **All 30 builtin commands refactored** to use `CommandContext` signature (from `(args, stdin, stdout, fs)`). Destructuring line preserves body logic unchanged.
-- **`xargs`** now resolves injected commands via `_resolve_command()` (not just builtins).
+- **`xargs`** now resolves injected commands via `_resolve_command()` (not just builtins). Propagates `ctx.env` to sub-commands and wraps generic exceptions.
+- **`gunzip`** uses `dataclasses.replace(ctx, ...)` for forward-compatible context propagation.
+- Nested `execute()` / `execute_script()` calls inherit the parent's injected commands when `commands=None`.
 
 ### Fixed
 - **Parser**: `:`, `@`, `,`, `%`, `+`, `!`, `^` added to `shlex.wordchars` so tokens like `user@host`, `100%`, `foo:bar` are not incorrectly split.
