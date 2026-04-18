@@ -10,6 +10,7 @@ import posixpath
 import re
 import tarfile
 import zipfile
+from dataclasses import replace
 from typing import TextIO
 
 from termish.context import CommandContext, CommandResult
@@ -101,11 +102,7 @@ def gzip(ctx: CommandContext) -> CommandResult | None:
 def gunzip(ctx: CommandContext) -> CommandResult | None:
     """Decompress gzip files. Equivalent to gzip -d."""
     # gunzip is just gzip with -d prepended
-    return gzip(
-        CommandContext(
-            args=["-d"] + ctx.args, stdin=ctx.stdin, stdout=ctx.stdout, fs=ctx.fs
-        )
-    )
+    return gzip(replace(ctx, args=["-d"] + ctx.args))
 
 
 def tar(ctx: CommandContext) -> CommandResult | None:

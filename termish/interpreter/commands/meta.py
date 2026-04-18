@@ -113,7 +113,11 @@ def xargs(ctx: CommandContext) -> CommandResult | None:
         token = _xargs_depth.set(depth + 1)
         try:
             sub_ctx = CommandContext(
-                args=cmd_args, stdin=cmd_stdin, stdout=cmd_stdout, fs=fs
+                args=cmd_args,
+                stdin=cmd_stdin,
+                stdout=cmd_stdout,
+                fs=fs,
+                env=ctx.env,
             )
             result = cmd_func(sub_ctx)
             if result and result.exit_code != 0:
@@ -122,6 +126,10 @@ def xargs(ctx: CommandContext) -> CommandResult | None:
                     if result.stderr
                     else f"{cmd_name}: exited with code {result.exit_code}"
                 )
+        except TerminalError:
+            raise
+        except Exception as e:
+            raise TerminalError(f"{cmd_name}: execution error: {e}")
         finally:
             _xargs_depth.reset(token)
         stdout.write(cmd_stdout.getvalue())
