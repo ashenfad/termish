@@ -8,6 +8,7 @@ Parses and executes shell scripts (pipelines, redirects, semicolons) against any
 
 - **Shell parser** -- pipes, redirects (`>`, `>>`, `<`), semicolons, quoted strings, line continuation
 - **30 builtins** -- ls, cat, grep, find, sed, tr, sort, uniq, cut, wc, diff, tar, gzip, zip, jq, xargs, basename, dirname, ...
+- **Custom commands** -- inject your own command handlers alongside builtins; injected commands override builtins and compose in pipelines
 - **jq engine** -- built-in jq filter parser and evaluator (field access, pipes, functions, conditionals)
 - **Pluggable filesystem** -- `FileSystem` is a `typing.Protocol`; any object with the right methods works
 - **MemoryFS included** -- in-memory filesystem for testing and lightweight use
@@ -38,6 +39,27 @@ execute('echo \'{"name": "alice", "score": 42}\' > data.json', fs)
 output = execute('jq -r ".name" data.json', fs)
 print(output)  # alice
 ```
+
+## Custom commands
+
+Inject your own commands via the `commands` parameter. They receive a `CommandContext` and compose naturally with builtins in pipelines:
+
+```python
+from termish import execute, MemoryFS, CommandContext, CommandResult
+
+def greet(ctx: CommandContext) -> CommandResult | None:
+    name = ctx.args[0] if ctx.args else "world"
+    ctx.stdout.write(f"hello {name}\n")
+    return None
+
+fs = MemoryFS()
+output = execute("greet alice | wc -c", fs, commands={"greet": greet})
+print(output)  # 12
+
+# Injected commands override builtins with the same name
+```
+
+All commands — builtin and injected — use the same `CommandContext` signature. See `CommandContext`, `CommandResult`, and `CommandFunc` in `termish.context` and `termish.errors`.
 
 ## FileSystem protocol
 
