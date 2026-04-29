@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.6] - 2026-04-29
+
+### Fixed
+- **tar**: `-C dir` is now honored during archive creation (`-c`). Previously the flag was parsed but silently dropped, so `tar -czf out.tar.gz -C /tmp name` looked up `name` in the cwd instead of `/tmp` and failed with `tar: error creating archive: tar: name: No such file or directory`. File paths are now resolved under the `-C` dir while archive names stay as written; absolute file paths still win.
+
 ## [0.1.5] - 2026-04-18
 
 ### Added
