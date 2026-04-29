@@ -143,7 +143,15 @@ def tar(ctx: CommandContext) -> CommandResult | None:
     target_dir = parsed.directory or fs.getcwd()
 
     if parsed.create:
-        _tar_create(archive_path, parsed.files, parsed.gzip, parsed.verbose, stdout, fs)
+        _tar_create(
+            archive_path,
+            parsed.files,
+            parsed.directory,
+            parsed.gzip,
+            parsed.verbose,
+            stdout,
+            fs,
+        )
     elif parsed.extract:
         _tar_extract(
             archive_path,
@@ -161,6 +169,7 @@ def tar(ctx: CommandContext) -> CommandResult | None:
 def _tar_create(
     archive_path: str,
     files: list[str],
+    chdir: str | None,
     use_gzip: bool,
     verbose: bool,
     stdout: TextIO,
@@ -177,7 +186,10 @@ def _tar_create(
     try:
         with tarfile.open(fileobj=buffer, mode=mode) as tf:
             for file_path in files:
-                _add_to_tar(tf, file_path, file_path, verbose, stdout, fs)
+                # -C dir: look up files under dir; archive name stays as written.
+                # posixpath.join leaves absolute file_path unchanged.
+                lookup = posixpath.join(chdir, file_path) if chdir else file_path
+                _add_to_tar(tf, lookup, file_path, verbose, stdout, fs)
     except Exception as e:
         raise TerminalError(f"tar: error creating archive: {e}")
 
