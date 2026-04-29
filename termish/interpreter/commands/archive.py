@@ -187,8 +187,9 @@ def _tar_create(
         with tarfile.open(fileobj=buffer, mode=mode) as tf:
             for file_path in files:
                 # -C dir: look up files under dir; archive name stays as written.
-                # posixpath.join leaves absolute file_path unchanged.
-                lookup = posixpath.join(chdir, file_path) if chdir else file_path
+                # posixpath.join leaves absolute file_path unchanged; normpath
+                # collapses `.`/`..` so the FS sees a clean path.
+                lookup = posixpath.normpath(posixpath.join(chdir or "", file_path))
                 _add_to_tar(tf, lookup, file_path, verbose, stdout, fs)
     except Exception as e:
         raise TerminalError(f"tar: error creating archive: {e}")
