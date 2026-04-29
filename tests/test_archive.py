@@ -260,6 +260,38 @@ class TestTar:
             names = tf.getnames()
             assert "/workspace/file.txt" in names
 
+    def test_tar_create_with_chdir(self, fs):
+        """tar -C dir name should look up `name` under `dir` and archive it under its bare name."""
+        fs.makedirs("/workspace/stellar-survivors")
+        fs.write("/workspace/stellar-survivors/main.py", b"print('hi')")
+        fs.write("/workspace/stellar-survivors/README.md", b"# game")
+
+        script = to_script("tar -czf /archive.tar.gz -C /workspace stellar-survivors")
+        execute_script(script, fs)
+
+        content = fs.read("/archive.tar.gz")
+        with tarfile.open(fileobj=io.BytesIO(content), mode="r:gz") as tf:
+            names = tf.getnames()
+            # arcnames stay relative to -C dir, not absolute
+            assert "stellar-survivors/" in names or "stellar-survivors" in names
+            assert "stellar-survivors/main.py" in names
+            assert "stellar-survivors/README.md" in names
+            # Should NOT contain absolute paths
+            assert not any(n.startswith("/workspace") for n in names)
+
+    def test_tar_create_chdir_absolute_file_wins(self, fs):
+        """An absolute file path should ignore -C (matches posix join semantics)."""
+        fs.write("/workspace/file.txt", b"hello")
+
+        script = to_script(
+            "tar -cf /workspace/archive.tar -C /nonexistent /workspace/file.txt"
+        )
+        execute_script(script, fs)
+
+        content = fs.read("/workspace/archive.tar")
+        with tarfile.open(fileobj=io.BytesIO(content), mode="r") as tf:
+            assert "/workspace/file.txt" in tf.getnames()
+
     def test_tar_extract(self, fs):
         """Test extracting tar archive."""
         # Create archive manually
