@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **Parser**: `2>&1` (and `>&1`) is now recognized as a no-op, matching the existing `2>file` behavior. Termish has no separate stderr stream during execution — handlers emit stderr only as a post-execution string on `CommandResult` — so any fd merge is vacuously a no-op. Previously the `>&` token fell through to "regular word" and `2 >& 1` became three positional args, breaking common idioms like `cmd 2>&1 | tail -20`.
+
 ## [0.1.6] - 2026-04-29
 
 ### Fixed

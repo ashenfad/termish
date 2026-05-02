@@ -89,6 +89,65 @@ def test_redirect_location_independence():
     assert cmd.redirects[0].target == "out.txt"
 
 
+def test_stderr_redirect_to_file_is_noop():
+    # Termish has no stderr stream — `2>/dev/null` parses but is discarded.
+    script = to_script("cmd 2>/dev/null")
+    cmd = script.pipelines[0].commands[0]
+    assert cmd.name == "cmd"
+    assert cmd.args == []
+    assert cmd.redirects == []
+
+    # `2>>err.log` (append form) likewise.
+    script = to_script("cmd 2>>err.log")
+    cmd = script.pipelines[0].commands[0]
+    assert cmd.args == []
+    assert cmd.redirects == []
+
+    # Mixed with a real stdout redirect: only the stdout one survives.
+    script = to_script("cmd > out.txt 2>/dev/null")
+    cmd = script.pipelines[0].commands[0]
+    assert len(cmd.redirects) == 1
+    assert cmd.redirects[0].type == ">"
+    assert cmd.redirects[0].target == "out.txt"
+
+
+def test_stderr_fd_merge_is_noop():
+    # `2>&1` is a vacuous fd merge in termish (no stderr stream).
+    script = to_script("cmd 2>&1")
+    cmd = script.pipelines[0].commands[0]
+    assert cmd.name == "cmd"
+    assert cmd.args == []
+    assert cmd.redirects == []
+
+    # `>&1` (no leading fd) — same treatment.
+    script = to_script("cmd >&1")
+    cmd = script.pipelines[0].commands[0]
+    assert cmd.args == []
+    assert cmd.redirects == []
+
+    # Carries through into a pipeline: stdout still pipes to next command.
+    script = to_script("esbuild app/index.jsx 2>&1 | tail -20")
+    pipeline = script.pipelines[0]
+    assert len(pipeline.commands) == 2
+    assert pipeline.commands[0].name == "esbuild"
+    assert pipeline.commands[0].args == ["app/index.jsx"]
+    assert pipeline.commands[0].redirects == []
+    assert pipeline.commands[1].name == "tail"
+    assert pipeline.commands[1].args == ["-20"]
+
+    # Composed with a real stdout redirect.
+    script = to_script("cmd > out.txt 2>&1")
+    cmd = script.pipelines[0].commands[0]
+    assert len(cmd.redirects) == 1
+    assert cmd.redirects[0].type == ">"
+    assert cmd.redirects[0].target == "out.txt"
+
+
+def test_stderr_fd_merge_missing_target():
+    with pytest.raises(ParseError, match="Expected fd after '>&'"):
+        to_script("cmd 2>&")
+
+
 def test_multiple_pipelines_semicolon():
     script = to_script("cd /tmp; ls")
     assert len(script.pipelines) == 2

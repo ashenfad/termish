@@ -167,6 +167,25 @@ def _parse_tokens(tokens: list[str], mask_map: dict[str, str]) -> Script:
                 # else: silently discard stderr redirect (e.g. 2>/dev/null)
                 continue
 
+            elif token == ">&":
+                # bash-style fd merge (e.g. "2>&1", ">&1").  Termish has no
+                # separate stderr stream during execution — handlers emit
+                # stderr only as a post-execution string on CommandResult,
+                # which surfaces via TerminalError.  Any fd merge is therefore
+                # vacuously a no-op; we recognize and discard rather than
+                # letting shlex's "2", ">&", "1" tokens fall through as args.
+                try:
+                    target_fd = next(it)
+                except StopIteration:
+                    raise ParseError("Expected fd after '>&'")
+                if target_fd in (";", "|", ">", ">>", "<", ">&", "\n", "&&", "||"):
+                    raise ParseError(f"Expected fd after '>&', got '{target_fd}'")
+                # Pop the leading source fd ("2" in "2>&1") if present.
+                if cmd_args and cmd_args[-1] in ("1", "2"):
+                    cmd_args.pop()
+                # Discard — nothing to merge.
+                continue
+
             else:
                 # Regular word (Command Name or Argument)
                 token = unmask(token)
