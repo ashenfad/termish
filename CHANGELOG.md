@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`file`** builtin -- minimal magic-byte sniffer covering gzip, zip, tar, PDF, PNG, JPEG, ELF, HTML, with a UTF-8/ASCII/binary fallback. Closes the "did my download actually produce a gzip?" sanity-check gap. Not a libmagic re-implementation -- no `--mime` / `-b` flags.
+- **`true`** and **`false`** builtins -- POSIX no-ops that unblock the `cmd || true` swallow-failure idiom. Previously `cat /missing || true` failed with `true: command not found`.
+
 ### Fixed
 - **Parser**: `2>&1` (and `>&1`) is now recognized as a no-op, matching the existing `2>file` behavior. Termish has no separate stderr stream during execution — handlers emit stderr only as a post-execution string on `CommandResult` — so any fd merge is vacuously a no-op. Previously the `>&` token fell through to "regular word" and `2 >& 1` became three positional args, breaking common idioms like `cmd 2>&1 | tail -20`.
 

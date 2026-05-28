@@ -14,8 +14,9 @@ from termish.errors import CommandFunc, TerminalError
 from termish.fs import FileSystem
 from termish.quote_masker import mask_quotes, unmask_and_unquote
 
-from .commands import archive, filesystem, meta, search, text
+from .commands import archive, control, filesystem, meta, search, text
 from .commands import diff as diff_cmd
+from .commands import file as file_mod
 from .commands import io as io_cmds
 from .commands import jq as jq_cmd
 from .commands import sed as sed_cmd
@@ -78,6 +79,11 @@ BUILTINS: dict[str, CommandFunc] = {
     "gunzip": archive.gunzip,
     "zip": archive.zip_cmd,
     "unzip": archive.unzip,
+    # Inspection
+    "file": file_mod.file_cmd,
+    # Control
+    "true": control.true_cmd,
+    "false": control.false_cmd,
 }
 
 

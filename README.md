@@ -7,7 +7,7 @@ Parses and executes shell scripts (pipelines, redirects, semicolons) against any
 ## Features
 
 - **Shell parser** -- pipes, redirects (`>`, `>>`, `<`), semicolons, quoted strings, line continuation
-- **30 builtins** -- ls, cat, grep, find, sed, tr, sort, uniq, cut, wc, diff, tar, gzip, zip, jq, xargs, basename, dirname, ...
+- **33 builtins** -- ls, cat, grep, find, sed, tr, sort, uniq, cut, wc, diff, tar, gzip, zip, jq, xargs, file, true, false, basename, dirname, ...
 - **Custom commands** -- inject your own command handlers alongside builtins; injected commands override builtins and compose in pipelines
 - **jq engine** -- built-in jq filter parser and evaluator (field access, pipes, functions, conditionals)
 - **Pluggable filesystem** -- `FileSystem` is a `typing.Protocol`; any object with the right methods works
