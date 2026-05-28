@@ -153,11 +153,19 @@ def _parse_tokens(tokens: list[str], mask_map: dict[str, str]) -> Script:
                 except StopIteration:
                     raise ParseError(f"Expected filename after '{token}'")
 
-                # Check if previous arg was a stderr fd (e.g. "2" in "2>/dev/null").
-                # Only "2" is recognized — higher numbers are regular args.
-                is_stderr = cmd_args and cmd_args[-1] == "2"
-                if is_stderr:
+                # Check if the preceding token was a stderr fd (e.g. "2" in
+                # "2>/dev/null"). Only "2" is recognized — higher numbers
+                # are regular args. The "2" may be at args[-1] (post-command,
+                # e.g. ``cmd 2>file``) or at cmd_name itself when the redirect
+                # leads the command (e.g. ``2>file cmd``).
+                if cmd_args and cmd_args[-1] == "2":
+                    is_stderr = True
                     cmd_args.pop()
+                elif not cmd_args and cmd_name == "2":
+                    is_stderr = True
+                    cmd_name = None
+                else:
+                    is_stderr = False
 
                 # Unmask target filename
                 target = unmask(target)
@@ -181,8 +189,12 @@ def _parse_tokens(tokens: list[str], mask_map: dict[str, str]) -> Script:
                 if target_fd in (";", "|", ">", ">>", "<", ">&", "\n", "&&", "||"):
                     raise ParseError(f"Expected fd after '>&', got '{target_fd}'")
                 # Pop the leading source fd ("2" in "2>&1") if present.
+                # May live at args[-1] (``cmd 2>&1``) or at cmd_name when the
+                # merge leads the command (``2>&1 cmd``).
                 if cmd_args and cmd_args[-1] in ("1", "2"):
                     cmd_args.pop()
+                elif not cmd_args and cmd_name in ("1", "2"):
+                    cmd_name = None
                 # Discard — nothing to merge.
                 continue
 

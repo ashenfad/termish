@@ -95,12 +95,17 @@ def _classify(data: bytes) -> str:
     if looks_like_binary(data):
         return "data"
 
-    # Distinguish ASCII-only from broader UTF-8.
-    if all(b < 0x80 for b in head):
+    # Scan the full buffer (not just ``head``) for both checks. Limiting
+    # to 1024 bytes would (a) misclassify a long file as text when its
+    # trailing content is not ASCII / not valid UTF-8, and (b) trip
+    # ``UnicodeDecodeError`` whenever a multi-byte UTF-8 char straddles
+    # the 1024-byte boundary (truncation, not real invalid UTF-8).
+    # ``looks_like_binary`` still samples only the first 4KB by design.
+    if all(b < 0x80 for b in data):
         return "ASCII text"
 
     try:
-        head.decode("utf-8")
+        data.decode("utf-8")
         return "UTF-8 Unicode text"
     except UnicodeDecodeError:
         # Not valid UTF-8 but didn't trip the binary heuristic — call it

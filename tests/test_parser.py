@@ -110,6 +110,13 @@ def test_stderr_redirect_to_file_is_noop():
     assert cmd.redirects[0].type == ">"
     assert cmd.redirects[0].target == "out.txt"
 
+    # Leading position — the "2" must not become the command name.
+    script = to_script("2>/dev/null cmd")
+    cmd = script.pipelines[0].commands[0]
+    assert cmd.name == "cmd"
+    assert cmd.args == []
+    assert cmd.redirects == []
+
 
 def test_stderr_fd_merge_is_noop():
     # `2>&1` is a vacuous fd merge in termish (no stderr stream).
@@ -141,6 +148,13 @@ def test_stderr_fd_merge_is_noop():
     assert len(cmd.redirects) == 1
     assert cmd.redirects[0].type == ">"
     assert cmd.redirects[0].target == "out.txt"
+
+    # Leading position — the "2" must not become the command name.
+    script = to_script("2>&1 cmd")
+    cmd = script.pipelines[0].commands[0]
+    assert cmd.name == "cmd"
+    assert cmd.args == []
+    assert cmd.redirects == []
 
 
 def test_stderr_fd_merge_missing_target():
