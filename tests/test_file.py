@@ -92,6 +92,24 @@ class TestFile:
             == "/greet.txt: UTF-8 Unicode text\n"
         )
 
+    def test_utf8_multibyte_crossing_1024_boundary(self, fs):
+        # 1023 ASCII bytes followed by 'é' (b"\xc3\xa9") — the multi-byte
+        # char straddles the 1024-byte mark. A 1024-byte sniff window
+        # would truncate mid-char and raise UnicodeDecodeError; scanning
+        # the full buffer correctly classifies as UTF-8.
+        fs.write("/boundary.txt", b"a" * 1023 + b"\xc3\xa9")
+        assert (
+            execute_script(to_script("file /boundary.txt"), fs)
+            == "/boundary.txt: UTF-8 Unicode text\n"
+        )
+
+    def test_long_file_with_trailing_non_ascii_is_not_ascii(self, fs):
+        # Clean ASCII for the first 1024 bytes but a high byte at the
+        # tail — must not be classified as "ASCII text".
+        fs.write("/mostly_ascii.txt", b"a" * 2000 + "é".encode("utf-8"))
+        out = execute_script(to_script("file /mostly_ascii.txt"), fs)
+        assert out == "/mostly_ascii.txt: UTF-8 Unicode text\n"
+
     def test_binary_fallback_data(self, fs):
         # Five printable chars with a NUL — no magic match, binary fallback.
         fs.write("/blob", b"ab\x00cd")
