@@ -142,3 +142,36 @@ def test_exit_code_survives_multi_pipeline_script():
 
 def test_default_exit_code_is_1():
     assert TerminalError("msg").exit_code == 1  # backward compatible
+
+
+# -- review fixes: continuation and comments (PR #14) -------------------------
+
+
+def test_continuation_before_heredoc_joins_command_line():
+    fs = MemoryFS()
+    out = execute("cat <<EOF \\\n | tr a-z A-Z\nshout this\nEOF", fs)
+    assert out == "SHOUT THIS\n"
+
+
+def test_backslash_in_body_stays_raw():
+    """The inverse hazard: continuation joining must NOT touch bodies."""
+    fs = MemoryFS()
+    out = execute("cat <<EOF\nC:\\path\\\nnext line\nEOF", fs)
+    assert out == "C:\\path\\\nnext line\n"
+
+
+def test_heredoc_op_in_comment_ignored():
+    fs = MemoryFS()
+    out = execute("echo hi # <<EOF not a heredoc", fs)
+    assert out.strip() == "hi"
+
+
+def test_hash_inside_word_not_a_comment():
+    script = to_script("cat <<E#F\nbody\nE#F")
+    assert script.pipelines[0].commands[0].redirects[0].content == "body\n"
+
+
+def test_hash_inside_quotes_not_a_comment():
+    fs = MemoryFS()
+    out = execute("echo '#<<EOF literal'", fs)
+    assert out.strip() == "#<<EOF literal"
