@@ -35,6 +35,16 @@ def _find_heredoc_ops(line: str) -> list[int]:
         elif c == '"' and not in_single:
             in_double = not in_double
         elif (
+            c == "#"
+            and not in_single
+            and not in_double
+            and (i == 0 or line[i - 1] in " \t")
+        ):
+            # Unquoted word-start '#' begins a comment — the tokenizer
+            # (shlex commenters) strips it; the scanner must agree or
+            # a '<<' inside a comment starts a phantom heredoc.
+            break
+        elif (
             c == "<"
             and not in_single
             and not in_double
@@ -74,6 +84,13 @@ def _extract_heredocs(text: str) -> tuple[str, dict[str, tuple[str, str]]]:
     i = 0
     while i < len(lines):
         line = lines[i]
+        # Join line continuations of the COMMAND line here (bodies below
+        # are consumed raw — a trailing backslash inside a body must
+        # survive, which is why the global continuation pass can't run
+        # before extraction). Odd trailing backslashes = continuation.
+        while (len(line) - len(line.rstrip("\\"))) % 2 == 1 and i + 1 < len(lines):
+            i += 1
+            line = line[:-1] + " " + lines[i].lstrip(" \t")
         pending: list[str] = []  # delimiters awaiting bodies, in order
         ops = _find_heredoc_ops(line)
         # rewrite right-to-left so positions stay valid
