@@ -12,7 +12,8 @@ from typing import Literal
 # <  : Input from file
 # >  : Output to file (overwrite)
 # >> : Output to file (append)
-RedirectType = Literal["<", ">", ">>"]
+# << : Here-document (inline input; content carried on the node)
+RedirectType = Literal["<", ">", ">>", "<<"]
 
 # Operators between pipelines:
 # ;  : Always execute next (bash-style unconditional)
@@ -34,12 +35,15 @@ class Redirect(Node):
     Represents an I/O redirection attached to a command.
 
     Attributes:
-        type: The type of redirection (read, write, append).
-        target: The target filename.
+        type: The type of redirection (read, write, append, heredoc).
+        target: The target filename (for ``<<``: the delimiter word,
+            kept for display/debugging).
+        content: Inline input body — only set for ``<<`` heredocs.
     """
 
     type: RedirectType
     target: str
+    content: str | None = None
 
 
 @dataclass(frozen=True)

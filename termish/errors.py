@@ -9,11 +9,17 @@ if TYPE_CHECKING:
 
 
 class TerminalError(Exception):
-    """Raised when a terminal command execution fails."""
+    """Raised when a terminal command execution fails.
 
-    def __init__(self, message: str, partial_output: str = ""):
+    ``exit_code`` preserves the failing command's exit status (127 for
+    command-not-found, a failing ``CommandResult``'s own code, 1 for
+    everything else) so callers can surface shell-faithful codes.
+    """
+
+    def __init__(self, message: str, partial_output: str = "", exit_code: int = 1):
         self.message = message
         self.partial_output = partial_output
+        self.exit_code = exit_code
         super().__init__(message)
 
 
