@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.7] - 2026-07-05
 
 ### Added
 - **Here-documents.** `cmd <<EOF ... EOF` (and `<<'EOF'` / `<<"EOF"` — identical semantics since termish has no expansion) feed an inline body to the command's stdin. Bodies are extracted from the raw text before tokenization, so quotes, pipes, and redirects inside a body are inert. The delimiter line matches exactly or whitespace-stripped (agents indent). Multiple heredocs per line consume bodies in order; unterminated heredocs and missing delimiters raise `ParseError`. Composes with pipelines (`cat <<EOF | sort`) and `tee` for the write-a-multiline-file idiom that previously required quoting gymnastics.
