@@ -153,7 +153,11 @@ def _execute_script_inner(script: Script, fs: FileSystem) -> str:
             last_error = TerminalError(f"Unexpected error: {e}")
 
     if last_error is not None:
-        raise TerminalError(last_error.message, partial_output=final_output.getvalue())
+        raise TerminalError(
+            last_error.message,
+            partial_output=final_output.getvalue(),
+            exit_code=last_error.exit_code,
+        )
 
     return final_output.getvalue()
 
@@ -172,16 +176,24 @@ def _execute_pipeline(pipeline: Pipeline, fs: FileSystem, stdout: TextIO):
         cmd_stdin = io.StringIO(current_input) if current_input else io.StringIO()
         cmd_stdout = io.StringIO()
 
-        # Handle Redirects (Input)
-        input_redirect = next((r for r in cmd_node.redirects if r.type == "<"), None)
-        if input_redirect:
-            path = resolve_path(input_redirect.target, fs)
-            try:
-                content_bytes = fs.read(path)
-                content_str = content_bytes.decode("utf-8", errors="replace")
-                cmd_stdin = io.StringIO(content_str)
-            except Exception as e:
-                raise TerminalError(f"{cmd_node.name}: {input_redirect.target}: {e}")
+        # Handle Redirects (Input) — last input-ish redirect wins (bash)
+        input_redirect = next(
+            (r for r in reversed(cmd_node.redirects) if r.type in ("<", "<<")),
+            None,
+        )
+        if input_redirect is not None:
+            if input_redirect.type == "<<":
+                cmd_stdin = io.StringIO(input_redirect.content or "")
+            else:
+                path = resolve_path(input_redirect.target, fs)
+                try:
+                    content_bytes = fs.read(path)
+                    content_str = content_bytes.decode("utf-8", errors="replace")
+                    cmd_stdin = io.StringIO(content_str)
+                except Exception as e:
+                    raise TerminalError(
+                        f"{cmd_node.name}: {input_redirect.target}: {e}"
+                    )
 
         # Prepare Args
         expanded_args = _expand_args(cmd_node.args, fs)
@@ -198,14 +210,15 @@ def _execute_pipeline(pipeline: Pipeline, fs: FileSystem, stdout: TextIO):
                     raise TerminalError(
                         f"{cmd_node.name}: {result.stderr}"
                         if result.stderr
-                        else f"{cmd_node.name}: exited with code {result.exit_code}"
+                        else f"{cmd_node.name}: exited with code {result.exit_code}",
+                        exit_code=result.exit_code,
                     )
             except TerminalError:
                 raise
             except Exception as e:
                 raise TerminalError(f"{cmd_node.name}: execution error: {e}")
         else:
-            raise TerminalError(f"{cmd_node.name}: command not found")
+            raise TerminalError(f"{cmd_node.name}: command not found", exit_code=127)
 
         # Capture output
         output_content = cmd_stdout.getvalue()

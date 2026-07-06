@@ -11,6 +11,116 @@ class ParseError(Exception):
     pass
 
 
+_HD_KEY = "__termish_heredoc_{n}__"
+
+
+def _find_heredoc_ops(line: str) -> list[int]:
+    """Positions of ``<<`` operators OUTSIDE quotes in a raw line.
+
+    termish has no expansion, so quote state is a simple two-flag
+    scan; backslash escapes the next char outside single quotes.
+    Triple ``<<<`` (herestring) is not supported and is skipped so it
+    falls through to the tokenizer as a normal parse problem.
+    """
+    positions: list[int] = []
+    in_single = in_double = False
+    i = 0
+    while i < len(line):
+        c = line[i]
+        if c == "\\" and not in_single:
+            i += 2
+            continue
+        if c == "'" and not in_double:
+            in_single = not in_single
+        elif c == '"' and not in_single:
+            in_double = not in_double
+        elif (
+            c == "<"
+            and not in_single
+            and not in_double
+            and line[i + 1 : i + 2] == "<"
+            and line[i + 2 : i + 3] != "<"
+            and line[i - 1 : i] != "<"
+        ):
+            positions.append(i)
+            i += 2
+            continue
+        i += 1
+    return positions
+
+
+def _extract_heredocs(text: str) -> tuple[str, dict[str, tuple[str, str]]]:
+    """Pull here-document bodies out of the raw text BEFORE tokenizing.
+
+    ``cmd <<EOF`` / ``<<'EOF'`` / ``<<"EOF"`` — the operator span is
+    replaced with ``<< __termish_heredoc_N__`` and the body (the lines
+    following the command line, up to the delimiter line) is stored in
+    the returned map as ``key -> (delimiter, body)``. Bodies are raw:
+    no expansion, quotes and operators inert (termish has no variable
+    expansion, so quoted and unquoted delimiters behave identically).
+    The delimiter line matches exactly or whitespace-stripped (agents
+    indent). Multiple heredocs on one line consume bodies in order.
+
+    Raises ParseError for a missing delimiter word or an unterminated
+    heredoc.
+    """
+    if "<<" not in text:
+        return text, {}
+
+    heredocs: dict[str, tuple[str, str]] = {}
+    out_lines: list[str] = []
+    lines = text.split("\n")
+    counter = 0
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        pending: list[str] = []  # delimiters awaiting bodies, in order
+        ops = _find_heredoc_ops(line)
+        # rewrite right-to-left so positions stay valid
+        for pos in reversed(ops):
+            j = pos + 2
+            while j < len(line) and line[j] in " \t":
+                j += 1
+            if j >= len(line):
+                raise ParseError("Expected delimiter after '<<'")
+            quote = line[j] if line[j] in "'\"" else ""
+            if quote:
+                end = line.find(quote, j + 1)
+                if end == -1:
+                    raise ParseError("Unterminated quote in heredoc delimiter")
+                delim = line[j + 1 : end]
+                j = end + 1
+            else:
+                end = j
+                while end < len(line) and line[end] not in " \t|;&<>":
+                    end += 1
+                delim = line[j:end]
+                j = end
+            if not delim:
+                raise ParseError("Expected delimiter after '<<'")
+            key = _HD_KEY.format(n=counter)
+            counter += 1
+            line = f"{line[:pos]}<< {key}{line[j:]}"
+            pending.insert(0, (key, delim))  # reversed scan -> restore order
+        out_lines.append(line)
+        i += 1
+        for key, delim in pending:
+            body_lines: list[str] = []
+            while True:
+                if i >= len(lines):
+                    raise ParseError(
+                        f"Unterminated heredoc: expected '{delim}' before end of input"
+                    )
+                candidate = lines[i]
+                i += 1
+                if candidate == delim or candidate.strip() == delim:
+                    break
+                body_lines.append(candidate)
+            body = "\n".join(body_lines) + "\n" if body_lines else ""
+            heredocs[key] = (delim, body)
+    return "\n".join(out_lines), heredocs
+
+
 def _handle_line_continuation(text: str) -> str:
     """Remove backslash-newline sequences (line continuation).
 
@@ -42,7 +152,11 @@ def to_script(text: str) -> Script:
     if not text or not text.strip():
         return Script(pipelines=[])
 
-    # 0. Handle line continuation (backslash-newline)
+    # 0a. Extract heredoc bodies (raw text — before continuation and
+    # masking so bodies are preserved byte-for-byte)
+    text, heredocs = _extract_heredocs(text)
+
+    # 0b. Handle line continuation (backslash-newline)
     text = _handle_line_continuation(text)
 
     # 1. Mask quoted strings to prevent shlex from stripping quotes
@@ -67,10 +181,14 @@ def to_script(text: str) -> Script:
     except ValueError as e:
         raise ParseError(f"Tokenization error: {e}") from e
 
-    return _parse_tokens(tokens, mask_map)
+    return _parse_tokens(tokens, mask_map, heredocs)
 
 
-def _parse_tokens(tokens: list[str], mask_map: dict[str, str]) -> Script:
+def _parse_tokens(
+    tokens: list[str],
+    mask_map: dict[str, str],
+    heredocs: dict[str, tuple[str, str]] | None = None,
+) -> Script:
     """
     Convert a list of tokens into a Script.
 
@@ -139,6 +257,18 @@ def _parse_tokens(tokens: list[str], mask_map: dict[str, str]) -> Script:
                 # It's a regular token — start the next command
                 next_token = unmask(next_token)
                 cmd_name = next_token
+                continue
+
+            elif token == "<<":
+                try:
+                    key = next(it)
+                except StopIteration:
+                    raise ParseError("Expected delimiter after '<<'")
+                entry = (heredocs or {}).get(key)
+                if entry is None:
+                    raise ParseError(f"Expected heredoc after '<<', got '{key}'")
+                delim, body = entry
+                cmd_redirects.append(Redirect(type="<<", target=delim, content=body))
                 continue
 
             elif token in (">", ">>", "<"):

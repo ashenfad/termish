@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Here-documents.** `cmd <<EOF ... EOF` (and `<<'EOF'` / `<<"EOF"` — identical semantics since termish has no expansion) feed an inline body to the command's stdin. Bodies are extracted from the raw text before tokenization, so quotes, pipes, and redirects inside a body are inert. The delimiter line matches exactly or whitespace-stripped (agents indent). Multiple heredocs per line consume bodies in order; unterminated heredocs and missing delimiters raise `ParseError`. Composes with pipelines (`cat <<EOF | sort`) and `tee` for the write-a-multiline-file idiom that previously required quoting gymnastics.
+- **Exit-code fidelity.** `TerminalError` gains an `exit_code` attribute (default 1, backward compatible): command-not-found raises 127, a failing `CommandResult` propagates its own code (a custom command's exit 22 now survives to the caller), and multi-pipeline scripts preserve the last failure's code alongside `partial_output`.
 - **`file`** builtin -- minimal magic-byte sniffer covering gzip, zip, tar, PDF, PNG, JPEG, ELF, HTML, with a UTF-8/ASCII/binary fallback. Closes the "did my download actually produce a gzip?" sanity-check gap. Not a libmagic re-implementation -- no `--mime` / `-b` flags.
 - **`true`** and **`false`** builtins -- POSIX no-ops that unblock the `cmd || true` swallow-failure idiom. Previously `cat /missing || true` failed with `true: command not found`.
 
