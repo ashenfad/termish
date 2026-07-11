@@ -245,41 +245,88 @@ def _execute_pipeline(
         # Prepare Args
         expanded_args = _expand_args(cmd_node.args, fs, env, last_exit_code)
 
+        # Stderr routing — last stderr redirect wins (bash)
+        stderr_redirect = next(
+            (
+                r
+                for r in reversed(cmd_node.redirects)
+                if r.type in ("2>", "2>>", "2>&1")
+            ),
+            None,
+        )
+
         # Execute Command — injected commands override built-ins
-        cmd_func = _resolve_command(cmd_name)
-        if cmd_func is not None:
-            try:
-                ctx = CommandContext(
-                    args=expanded_args,
-                    stdin=cmd_stdin,
-                    stdout=cmd_stdout,
-                    fs=fs,
-                    env=env,
+        failure: TerminalError | None = None
+        result = None
+        try:
+            cmd_func = _resolve_command(cmd_name)
+            if cmd_func is None:
+                raise TerminalError(f"{cmd_name}: command not found", exit_code=127)
+            ctx = CommandContext(
+                args=expanded_args,
+                stdin=cmd_stdin,
+                stdout=cmd_stdout,
+                fs=fs,
+                env=env,
+            )
+            result = cmd_func(ctx)
+            if result is not None and result.exit_code != 0:
+                raise TerminalError(
+                    f"{cmd_name}: {result.stderr}"
+                    if result.stderr
+                    else f"{cmd_name}: exited with code {result.exit_code}",
+                    exit_code=result.exit_code,
+                    stderr=result.stderr,
                 )
-                result = cmd_func(ctx)
-                if result is not None and result.exit_code != 0:
-                    raise TerminalError(
-                        f"{cmd_name}: {result.stderr}"
-                        if result.stderr
-                        else f"{cmd_name}: exited with code {result.exit_code}",
-                        exit_code=result.exit_code,
-                        stderr=result.stderr,
-                    )
-                if result is not None and result.stderr:
-                    # Success with diagnostics (e.g. warnings): a terminal
-                    # shows stderr on screen but never feeds it to the next
-                    # pipe stage — write it straight to the transcript.
-                    stdout.write(
-                        result.stderr
-                        if result.stderr.endswith("\n")
-                        else result.stderr + "\n"
-                    )
-            except TerminalError:
+        except TerminalError as e:
+            if stderr_redirect is None:
                 raise
-            except Exception as e:
-                raise TerminalError(f"{cmd_name}: execution error: {e}")
+            failure = e
+        except Exception as e:
+            wrapped = TerminalError(f"{cmd_name}: execution error: {e}")
+            if stderr_redirect is None:
+                raise wrapped
+            failure = wrapped
+
+        # This command's stderr text ('' if none / silent failure)
+        if failure is not None:
+            err_text = _diagnostic(failure)
+        elif result is not None and result.stderr:
+            err_text = (
+                result.stderr if result.stderr.endswith("\n") else result.stderr + "\n"
+            )
         else:
-            raise TerminalError(f"{cmd_name}: command not found", exit_code=127)
+            err_text = ""
+
+        # Route stderr
+        if stderr_redirect is None:
+            if err_text:
+                # Success with diagnostics (e.g. warnings): a terminal
+                # shows stderr on screen but never feeds it to the next
+                # pipe stage — write it straight to the transcript.
+                stdout.write(err_text)
+        elif stderr_redirect.type == "2>&1":
+            # Merge into stdout: joins the pipe / transcript below.
+            cmd_stdout.write(err_text)
+        else:
+            # 2>file truncates (even when no stderr was produced, as in
+            # bash); 2>>file appends; /dev/null discards.
+            target = _expand_word(stderr_redirect.target, env, last_exit_code)
+            if target != "/dev/null":
+                path = resolve_path(target, fs)
+                try:
+                    _write_to_file(path, err_text, stderr_redirect.type == "2>>", fs)
+                except Exception as e:
+                    raise TerminalError(f"{cmd_name}: redirect failed: {e}")
+
+        # A failure whose stderr went to a file still aborts the pipeline
+        # (silently — its diagnostic was consumed by the redirect).  A
+        # "2>&1" failure keeps the pipeline going so downstream stages see
+        # the merged text (the agent idiom ``cmd 2>&1 | head``); if it's
+        # the final stage, the failure resurfaces after the loop.
+        if failure is not None and stderr_redirect.type != "2>&1":
+            raise TerminalError(failure.message, exit_code=failure.exit_code, stderr="")
+        merged_failure = failure  # only ever non-None for "2>&1"
 
         # Capture output
         output_content = cmd_stdout.getvalue()
@@ -301,6 +348,17 @@ def _execute_pipeline(
 
     if current_input:
         stdout.write(current_input)
+
+    # A "2>&1" failure in the FINAL stage determines the pipeline's exit
+    # (bash without pipefail: earlier merged failures are superseded by
+    # later stages).  Its diagnostic already reached the transcript or an
+    # output redirect via the merge, so the raise itself is silent.
+    if merged_failure is not None:
+        raise TerminalError(
+            merged_failure.message,
+            exit_code=merged_failure.exit_code,
+            stderr="",
+        )
 
 
 # Variable forms recognized at expansion time.  Anything else involving
