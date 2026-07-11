@@ -8,6 +8,7 @@ Parses and executes shell scripts (pipelines, redirects, semicolons) against any
 
 - **Shell parser** -- pipes, redirects (`>`, `>>`, `<`), heredocs (`<<EOF`), semicolons, quoted strings, line continuation
 - **Variable expansion** -- `$?` (last exit code), `$VAR` / `${VAR}` from an env dict; expands in unquoted and double-quoted contexts, literal in single quotes
+- **Terminal-faithful transcript** -- stderr diagnostics appear in the returned output when execution continues past a failure (`cmd; next`, `cmd || rescue`), like a real terminal screen; a failure with nothing after it raises `TerminalError`
 - **36 builtins** -- ls, cat, grep, find, sed, tr, sort, uniq, cut, wc, diff, tar, gzip, zcat, zip, jq, xargs, file, true, false, basename, dirname, ...
 - **Custom commands** -- inject your own command handlers alongside builtins; injected commands override builtins and compose in pipelines
 - **jq engine** -- built-in jq filter parser and evaluator (field access, pipes, functions, conditionals)

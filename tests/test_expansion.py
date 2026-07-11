@@ -25,10 +25,12 @@ class TestExitCode:
         assert execute("false; echo $?", fs) == "1\n"
 
     def test_exit_code_command_not_found(self, fs):
-        assert execute("nosuchcmd; echo $?", fs) == "127\n"
+        out = execute("nosuchcmd; echo $?", fs)
+        assert out == "nosuchcmd: command not found\n127\n"
 
     def test_exit_code_missing_file(self, fs):
-        assert execute("cat /missing; echo exit=$?", fs) == "exit=1\n"
+        out = execute("cat /missing; echo exit=$?", fs)
+        assert out == "cat: /missing: No such file or directory\nexit=1\n"
 
     def test_exit_code_in_double_quotes(self, fs):
         assert execute('false; echo "code: $?"', fs) == "code: 1\n"
@@ -57,7 +59,7 @@ class TestExitCode:
             return None
 
         out = execute("curl --max-time 5 x; echo exit=$?", fs, commands={"curl": curl})
-        assert out == "exit=2\n"
+        assert out == "unrecognized option\nexit=2\n"
 
     def test_exit_code_not_a_glob(self, fs):
         """$? must expand before glob detection ('?' is a glob char)."""

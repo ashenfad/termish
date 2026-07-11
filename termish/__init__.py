@@ -49,10 +49,13 @@ def execute(
             so a long-lived dict carries state across execute() calls.
 
     Returns:
-        Captured stdout as a string.
+        The terminal transcript as a string: captured stdout, plus
+        stderr diagnostics from failures that execution continued past
+        (``cmd; ...``, ``cmd || rescue``) and from warnings — what a
+        real terminal would show on screen.
 
     Raises:
-        TerminalError: If a command fails.
+        TerminalError: If the last executed pipeline fails.
         ParseError: If the script has invalid syntax.
     """
     return execute_script(to_script(script_text), fs, commands=commands, env=env)
