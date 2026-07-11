@@ -47,4 +47,7 @@ class TestOrTrueIdiom:
     def test_rescues_a_failing_command(self, fs):
         # The canonical agent transcript: `<cmd that may fail> || true`.
         # Use a guaranteed-missing path to provoke the failure.
-        assert execute_script(to_script("cat /missing || true"), fs) == ""
+        # `|| true` swallows the exit code; the diagnostic still shows
+        # in the transcript (as on a real terminal).
+        out = execute_script(to_script("cat /missing || true"), fs)
+        assert out == "cat: /missing: No such file or directory\n"

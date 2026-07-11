@@ -124,7 +124,9 @@ def xargs(ctx: CommandContext) -> CommandResult | None:
                 raise TerminalError(
                     f"{cmd_name}: {result.stderr}"
                     if result.stderr
-                    else f"{cmd_name}: exited with code {result.exit_code}"
+                    else f"{cmd_name}: exited with code {result.exit_code}",
+                    exit_code=result.exit_code,
+                    stderr=result.stderr,
                 )
         except TerminalError:
             raise

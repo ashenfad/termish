@@ -116,7 +116,9 @@ def execute_script(
             the caller. Defaults to an empty environment.
 
     Returns:
-        Captured stdout as a string.
+        The terminal transcript as a string: captured stdout, plus
+        stderr diagnostics from failures that execution continued past
+        and from success-with-stderr warnings.
 
     Raises:
         TerminalError: If the last executed pipeline failed (contains partial output).
@@ -136,12 +138,26 @@ def execute_script(
         _injected_commands.reset(token)
 
 
+def _diagnostic(e: TerminalError) -> str:
+    """Terminal-visible stderr text for a failure ('' if it failed silently)."""
+    text = e.message if e.stderr is None else e.stderr
+    if text and not text.endswith("\n"):
+        text += "\n"
+    return text
+
+
 def _execute_script_inner(script: Script, fs: FileSystem, env: dict[str, str]) -> str:
     """Inner execution loop (injected commands already set via context var)."""
     final_output = io.StringIO()
     last_succeeded = True
     last_error: TerminalError | None = None
     last_exit_code = 0  # what "$?" expands to
+    # Diagnostic from the most recent failure, not yet shown.  A terminal
+    # prints stderr as it happens; we surface it in the transcript once
+    # execution demonstrably continues past the failure.  If nothing runs
+    # afterwards, the failure is the script's outcome and the diagnostic
+    # travels via the raised TerminalError instead (no duplication).
+    pending_diag = ""
 
     for i, pipeline in enumerate(script.pipelines):
         # Determine whether to execute this pipeline based on the preceding operator
@@ -153,6 +169,10 @@ def _execute_script_inner(script: Script, fs: FileSystem, env: dict[str, str]) -
                 continue
             # ";" always executes
 
+        if pending_diag:
+            final_output.write(pending_diag)
+        pending_diag = ""
+
         try:
             _execute_pipeline(pipeline, fs, final_output, env, last_exit_code)
             last_succeeded = True
@@ -162,16 +182,19 @@ def _execute_script_inner(script: Script, fs: FileSystem, env: dict[str, str]) -
             last_succeeded = False
             last_error = e
             last_exit_code = e.exit_code
+            pending_diag = _diagnostic(e)
         except Exception as e:
             last_succeeded = False
             last_error = TerminalError(f"Unexpected error: {e}")
             last_exit_code = 1
+            pending_diag = _diagnostic(last_error)
 
     if last_error is not None:
         raise TerminalError(
             last_error.message,
             partial_output=final_output.getvalue(),
             exit_code=last_error.exit_code,
+            stderr=last_error.stderr,
         )
 
     return final_output.getvalue()
@@ -240,6 +263,16 @@ def _execute_pipeline(
                         if result.stderr
                         else f"{cmd_name}: exited with code {result.exit_code}",
                         exit_code=result.exit_code,
+                        stderr=result.stderr,
+                    )
+                if result is not None and result.stderr:
+                    # Success with diagnostics (e.g. warnings): a terminal
+                    # shows stderr on screen but never feeds it to the next
+                    # pipe stage — write it straight to the transcript.
+                    stdout.write(
+                        result.stderr
+                        if result.stderr.endswith("\n")
+                        else result.stderr + "\n"
                     )
             except TerminalError:
                 raise

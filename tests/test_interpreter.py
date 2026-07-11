@@ -501,9 +501,10 @@ class TestConditionalOperators:
             assert "no" not in (e.partial_output or "")
 
     def test_or_first_fails(self, fs):
-        """|| runs the second command when the first fails."""
+        """|| runs the second command when the first fails; the failure's
+        diagnostic shows in the transcript first (terminal behavior)."""
         out = execute_script(to_script("cd /nonexistent || echo fallback"), fs)
-        assert out == "fallback\n"
+        assert out == "cd: no such file or directory: /nonexistent\nfallback\n"
 
     def test_or_first_succeeds(self, fs):
         """|| skips the second command when the first succeeds."""
@@ -519,9 +520,10 @@ class TestConditionalOperators:
         assert "recovered" in out
 
     def test_semicolon_always_continues(self, fs):
-        """Semicolons always continue regardless of failure."""
+        """Semicolons always continue regardless of failure; the failure's
+        diagnostic shows in the transcript."""
         out = execute_script(to_script("cd /nonexistent ; echo yes"), fs)
-        assert out == "yes\n"
+        assert out == "cd: no such file or directory: /nonexistent\nyes\n"
 
     def test_mixed_operators(self, fs):
         out = execute_script(to_script("echo a ; echo b && echo c"), fs)

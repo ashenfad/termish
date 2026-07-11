@@ -137,7 +137,7 @@ class TestFile:
 
     def test_agent_post_download_pattern(self, fs):
         # The exact transcript that prompted this work — make sure
-        # `file FOO || true` survives even when FOO is missing.
-        assert (
-            execute_script(to_script("file /Electric_Vehicle.csv.gz || true"), fs) == ""
-        )
+        # `file FOO || true` survives even when FOO is missing (the
+        # diagnostic still shows, as on a real terminal).
+        out = execute_script(to_script("file /Electric_Vehicle.csv.gz || true"), fs)
+        assert out.startswith("file: /Electric_Vehicle.csv.gz: ")
