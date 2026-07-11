@@ -9,11 +9,14 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 # Types of I/O redirection:
-# <  : Input from file
-# >  : Output to file (overwrite)
-# >> : Output to file (append)
-# << : Here-document (inline input; content carried on the node)
-RedirectType = Literal["<", ">", ">>", "<<"]
+# <    : Input from file
+# >    : Output to file (overwrite)
+# >>   : Output to file (append)
+# <<   : Here-document (inline input; content carried on the node)
+# 2>   : Stderr to file (overwrite); /dev/null discards
+# 2>>  : Stderr to file (append)
+# 2>&1 : Stderr merged into stdout (into the pipe)
+RedirectType = Literal["<", ">", ">>", "<<", "2>", "2>>", "2>&1"]
 
 # Operators between pipelines:
 # ;  : Always execute next (bash-style unconditional)

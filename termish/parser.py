@@ -330,19 +330,24 @@ def _parse_tokens(
 
                 # Unmask target filename
                 target = unmask(target)
-                if not is_stderr:
+                if is_stderr:
+                    # stderr redirect: "2>file" / "2>>file"
+                    cmd_redirects.append(
+                        Redirect(type="2" + token, target=target)  # type: ignore[arg-type]
+                    )
+                else:
                     # stdout redirect (or fd 1)
                     cmd_redirects.append(Redirect(type=token, target=target))  # type: ignore[arg-type]
-                # else: silently discard stderr redirect (e.g. 2>/dev/null)
                 continue
 
             elif token == ">&":
-                # bash-style fd merge (e.g. "2>&1", ">&1").  Termish has no
-                # separate stderr stream during execution — handlers emit
-                # stderr only as a post-execution string on CommandResult,
-                # which surfaces via TerminalError.  Any fd merge is therefore
-                # vacuously a no-op; we recognize and discard rather than
-                # letting shlex's "2", ">&", "1" tokens fall through as args.
+                # bash-style fd merge (e.g. "2>&1", ">&1").  "2>&1" becomes
+                # a real Redirect node — the interpreter merges the command's
+                # stderr into its stdout (into the pipe).  Other merges
+                # ("1>&2", ">&1", "2>&2") stay no-ops: termish has no
+                # separate stderr stream to merge INTO, so they're vacuous;
+                # we recognize and discard rather than letting shlex's "2",
+                # ">&", "1" tokens fall through as args.
                 try:
                     target_fd = next(it)
                 except StopIteration:
@@ -352,11 +357,15 @@ def _parse_tokens(
                 # Pop the leading source fd ("2" in "2>&1") if present.
                 # May live at args[-1] (``cmd 2>&1``) or at cmd_name when the
                 # merge leads the command (``2>&1 cmd``).
+                source_fd = None
                 if cmd_args and cmd_args[-1] in ("1", "2"):
-                    cmd_args.pop()
+                    source_fd = cmd_args.pop()
                 elif not cmd_args and cmd_name in ("1", "2"):
+                    source_fd = cmd_name
                     cmd_name = None
-                # Discard — nothing to merge.
+                if source_fd == "2" and target_fd == "1":
+                    cmd_redirects.append(Redirect(type="2>&1", target="1"))
+                # else: discard — nothing to merge.
                 continue
 
             else:

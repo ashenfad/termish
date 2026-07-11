@@ -115,6 +115,100 @@ class TestSuccessWithStderr:
         assert out == "warn: something\n2\n"
 
 
+class TestStderrToFile:
+    """`2>file` / `2>>file` / `2>/dev/null` route stderr instead of no-op."""
+
+    def test_capture_to_file(self, fs):
+        out = execute("cat /missing 2>/err.txt; echo ok", fs)
+        assert out == "ok\n"  # diagnostic consumed by the redirect
+        assert fs.read("/err.txt") == b"cat: /missing: No such file or directory\n"
+
+    def test_dev_null_suppresses(self, fs):
+        out = execute("cat /missing 2>/dev/null; echo ok", fs)
+        assert out == "ok\n"
+        assert not fs.exists("/dev/null")
+
+    def test_dev_null_preserves_exit_code(self, fs):
+        out = execute("cat /missing 2>/dev/null; echo exit=$?", fs)
+        assert out == "exit=1\n"
+
+    def test_truncates_even_without_stderr(self, fs):
+        # bash creates/truncates the target regardless of stderr output
+        fs.write("/err.txt", b"old content")
+        out = execute("echo hi 2>/err.txt", fs)
+        assert out == "hi\n"
+        assert fs.read("/err.txt") == b""
+
+    def test_append_form(self, fs):
+        execute("cat /a 2>>/err.txt; cat /b 2>>/err.txt; true", fs)
+        assert fs.read("/err.txt") == (
+            b"cat: /a: No such file or directory\ncat: /b: No such file or directory\n"
+        )
+
+    def test_redirected_failure_still_aborts_and_raises_silently(self, fs):
+        with pytest.raises(TerminalError) as exc_info:
+            execute("cat /missing 2>/dev/null", fs)
+        assert exc_info.value.exit_code == 1
+        assert exc_info.value.stderr == ""  # diagnostic was consumed
+
+    def test_command_not_found_suppressible(self, fs):
+        out = execute("nosuchcmd 2>/dev/null; echo ok", fs)
+        assert out == "ok\n"
+
+    def test_custom_command_stderr_to_file(self, fs):
+        out = execute(
+            "curl --fail x 2>/err.txt; echo exit=$?", fs, commands={"curl": _curl}
+        )
+        assert out == "exit=2\n"
+        assert fs.read("/err.txt") == b"curl: option --fail: is unknown\n"
+
+    def test_variable_in_target(self, fs):
+        execute("cat /missing 2>$LOG; true", fs, env={"LOG": "/my.log"})
+        assert fs.read("/my.log").startswith(b"cat: /missing: ")
+
+
+class TestStderrMerge:
+    """`2>&1` merges stderr into the stdout pipe."""
+
+    def test_error_flows_through_pipe(self, fs):
+        # THE agent idiom: capture error text through the pipe
+        out = execute("cat /missing 2>&1 | head -1", fs)
+        assert out == "cat: /missing: No such file or directory\n"
+
+    def test_merged_midpipe_failure_does_not_abort(self, fs):
+        # bash without pipefail: pipeline exit comes from the last stage
+        out = execute("cat /missing 2>&1 | wc -l; echo exit=$?", fs)
+        assert out == " 1\nexit=0\n"
+
+    def test_final_stage_merge_failure_raises_with_exit_code(self, fs):
+        with pytest.raises(TerminalError) as exc_info:
+            execute("cat /missing 2>&1", fs)
+        assert exc_info.value.exit_code == 1
+        # diagnostic already reached the transcript via the merge
+        assert exc_info.value.partial_output == (
+            "cat: /missing: No such file or directory\n"
+        )
+        assert exc_info.value.stderr == ""
+
+    def test_merge_to_output_redirect(self, fs):
+        # cmd > f 2>&1 — merged content lands in the file
+        execute("cat /missing 2>&1 > /all.txt; true", fs)
+        assert fs.read("/all.txt") == b"cat: /missing: No such file or directory\n"
+
+    def test_success_warning_joins_pipe(self, fs):
+        def warn(ctx: CommandContext) -> CommandResult | None:
+            ctx.stdout.write("a\nb\n")
+            return CommandResult(exit_code=0, stderr="warn: something\n")
+
+        # with 2>&1 the warning is IN the pipe (3 lines), not the transcript
+        out = execute("warn 2>&1 | wc -l", fs, commands={"warn": warn})
+        assert out == " 3\n"
+
+    def test_stdout_unaffected_on_success(self, fs):
+        assert execute("echo hi 2>&1", fs) == "hi\n"
+        assert execute("echo hi 2>&1 | wc -l", fs) == "1\n"
+
+
 class TestRetrospectiveSpiral:
     """The full observed line, now with visible errors AND exit code."""
 
@@ -123,6 +217,17 @@ class TestRetrospectiveSpiral:
         out = execute(
             "cd /app && curl --max-time 5 'api/overview' 2>&1 | head -30; "
             'echo "=== EXIT $? ==="',
+            fs,
+            commands={"curl": _curl},
+        )
+        # bash parity: with 2>&1 the error text flows through the pipe and
+        # $? is head's status (0, no pipefail) — the failure is VISIBLE.
+        assert out == "curl: option --max-time: is unknown\n=== EXIT 0 ===\n"
+
+    def test_rejected_flag_without_merge_keeps_exit_code(self, fs):
+        # without 2>&1 the pipeline aborts: diagnostic + exit 2
+        out = execute(
+            "curl --max-time 5 'api/overview' | head -30; echo \"=== EXIT $? ===\"",
             fs,
             commands={"curl": _curl},
         )
