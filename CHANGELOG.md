@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **`zcat`** / **`gzcat`** builtins -- decompress gzip files to stdout (equivalent to `gzip -dc`). Unlike `gzip -d`, no `.gz` suffix is required. Both names map to the same handler (Linux agents type `zcat`, macOS-trained ones `gzcat`). File arguments only -- piping compressed bytes via stdin is not supported (pipelines are text-based).
+
 ## [0.1.7] - 2026-07-05
 
 ### Added

@@ -125,6 +125,68 @@ class TestGzipStdout:
         assert gzip_module.decompress(out.encode("latin-1")) == b"data"
 
 
+class TestZcat:
+    """Tests for zcat/gzcat commands."""
+
+    def test_zcat_basic(self, fs):
+        """zcat should decompress to stdout and keep the original."""
+        compressed = gzip_module.compress(b"hello world\n")
+        fs.write("/f.txt.gz", compressed)
+        out = execute_script(to_script("zcat f.txt.gz"), fs)
+        assert out == "hello world\n"
+        assert fs.exists("/f.txt.gz")
+
+    def test_gzcat_alias(self, fs):
+        """gzcat should behave identically to zcat."""
+        compressed = gzip_module.compress(b"data\n")
+        fs.write("/f.txt.gz", compressed)
+        out = execute_script(to_script("gzcat f.txt.gz"), fs)
+        assert out == "data\n"
+
+    def test_zcat_no_gz_suffix(self, fs):
+        """zcat should not require a .gz suffix, unlike gzip -d."""
+        compressed = gzip_module.compress(b"suffixless\n")
+        fs.write("/blob", compressed)
+        out = execute_script(to_script("zcat blob"), fs)
+        assert out == "suffixless\n"
+
+    def test_zcat_multiple_files(self, fs):
+        """zcat should concatenate multiple files in order."""
+        fs.write("/a.gz", gzip_module.compress(b"one\n"))
+        fs.write("/b.gz", gzip_module.compress(b"two\n"))
+        out = execute_script(to_script("zcat a.gz b.gz"), fs)
+        assert out == "one\ntwo\n"
+
+    def test_zcat_pipeline(self, fs):
+        """zcat should compose with pipelines."""
+        compressed = gzip_module.compress(b"banana\napple\ncherry\n")
+        fs.write("/fruit.gz", compressed)
+        out = execute_script(to_script("zcat fruit.gz | sort | head -1"), fs)
+        assert out == "apple\n"
+
+    def test_zcat_not_gzip(self, fs):
+        """zcat on a non-gzip file should fail clearly."""
+        fs.write("/plain.txt", b"not compressed")
+        with pytest.raises(TerminalError, match="not in gzip format"):
+            execute_script(to_script("zcat plain.txt"), fs)
+
+    def test_zcat_file_not_found(self, fs):
+        """zcat on a missing file should fail clearly."""
+        with pytest.raises(TerminalError, match="No such file or directory"):
+            execute_script(to_script("zcat missing.gz"), fs)
+
+    def test_zcat_no_files(self, fs):
+        """zcat with no arguments should fail (no binary stdin support)."""
+        with pytest.raises(TerminalError, match="no files specified"):
+            execute_script(to_script("zcat"), fs)
+
+    def test_zcat_directory(self, fs):
+        """zcat on a directory should fail clearly."""
+        fs.mkdir("/somedir")
+        with pytest.raises(TerminalError, match="Is a directory"):
+            execute_script(to_script("zcat somedir"), fs)
+
+
 class TestGzipLevel:
     def test_compression_level(self, fs):
         """gzip -1 and -9 should both produce valid gzip output."""

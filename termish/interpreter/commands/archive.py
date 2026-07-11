@@ -105,6 +105,41 @@ def gunzip(ctx: CommandContext) -> CommandResult | None:
     return gzip(replace(ctx, args=["-d"] + ctx.args))
 
 
+def zcat(ctx: CommandContext) -> CommandResult | None:
+    """Decompress gzip files to stdout. Equivalent to gzip -dc.
+
+    Unlike gzip -d, does not require a .gz suffix — any readable gzip
+    file works. Registered as both ``zcat`` and ``gzcat``.
+    """
+    args, stdout, fs = ctx.args, ctx.stdout, ctx.fs
+
+    parser = CommandArgParser(prog="zcat", add_help=False)
+    parser.add_argument("-f", "--force", action="store_true", help="Ignored")
+    parser.add_argument("files", nargs="*")
+
+    parsed, unknown = parser.parse_known_args(args)
+    if unknown:
+        raise TerminalError(f"zcat: unknown arguments: {unknown}")
+
+    if not parsed.files:
+        raise TerminalError("zcat: no files specified")
+
+    for path in parsed.files:
+        try:
+            content = fs.read(path)
+        except FileNotFoundError:
+            raise TerminalError(f"zcat: {path}: No such file or directory")
+        except IsADirectoryError:
+            raise TerminalError(f"zcat: {path}: Is a directory")
+
+        try:
+            result = gzip_module.decompress(content)
+        except Exception:
+            raise TerminalError(f"zcat: {path}: not in gzip format")
+
+        stdout.write(result.decode("utf-8", errors="replace"))
+
+
 def tar(ctx: CommandContext) -> CommandResult | None:
     """Create or extract tar archives."""
     args, _stdin, stdout, fs = ctx.args, ctx.stdin, ctx.stdout, ctx.fs
