@@ -63,6 +63,13 @@ expansion (`'$?'` stays literal). Command substitution `$(...)` is not
 supported and raises `ParseError` rather than mangling silently.
 Heredoc bodies are never expanded.
 
+Expansions are **never field-split** -- this is zsh's behavior, not
+bash's, and it's deliberate: a value with spaces stays one argument
+(`grep $PAT file` with `PAT="a b"` searches for `a b`), and a
+multi-word command name is a visible `command not found` rather than a
+silent re-parse. An empty-expanding command word shifts away
+(`$UNSET echo hi` runs `echo hi`), also as in zsh.
+
 ## Custom commands
 
 Inject your own commands via the `commands` parameter. They receive a `CommandContext` and compose naturally with builtins in pipelines:

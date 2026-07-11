@@ -215,12 +215,25 @@ def _execute_pipeline(
         return
 
     current_input: str | None = None
+    merged_failure: TerminalError | None = None
 
     for cmd_node in pipeline.commands:
         cmd_stdin = io.StringIO(current_input) if current_input else io.StringIO()
         cmd_stdout = io.StringIO()
 
-        cmd_name = _expand_word(cmd_node.name, env, last_exit_code)
+        # Expand the command name and args as one word list so an
+        # empty-expanding name shifts away (zsh-style: `$UNSET echo hi`
+        # runs `echo hi`).  Multi-word values do NOT field-split —
+        # deliberately zsh, not bash: `CMD="echo hello"; $CMD` is
+        # "echo hello: command not found", never a silent re-parse.
+        words = _expand_args([cmd_node.name] + cmd_node.args, fs, env, last_exit_code)
+        if not words:
+            # The whole command expanded to nothing (`$UNSET` alone):
+            # a silent no-op, like zsh.  Redirects are not processed.
+            merged_failure = None
+            current_input = ""
+            continue
+        cmd_name, expanded_args = words[0], words[1:]
 
         # Handle Redirects (Input) — last input-ish redirect wins (bash)
         input_redirect = next(
@@ -241,9 +254,6 @@ def _execute_pipeline(
                     cmd_stdin = io.StringIO(content_str)
                 except Exception as e:
                     raise TerminalError(f"{cmd_name}: {target}: {e}")
-
-        # Prepare Args
-        expanded_args = _expand_args(cmd_node.args, fs, env, last_exit_code)
 
         # Stderr routing — last stderr redirect wins (bash)
         stderr_redirect = next(
@@ -363,9 +373,13 @@ def _execute_pipeline(
 
 # Variable forms recognized at expansion time.  Anything else involving
 # '$' (e.g. "$(", "$1", "$$", a trailing "grep foo$" anchor) is left
-# literal — visible non-support beats silent mangling.
+# literal — visible non-support beats silent mangling.  The escape
+# alternatives implement the double-quote backslash rule: backslash is
+# special only before '\' or '$' (so "\d" in a regex stays "\d", while
+# "\\$NAME" is an escaped backslash followed by a live expansion).
 _VAR_RE = re.compile(
-    r"\\\$"  # escaped dollar -> literal $
+    r"\\\\"  # escaped backslash -> literal backslash
+    r"|\\\$"  # escaped dollar -> literal $
     r"|\$\?"  # last exit code
     r"|\$\{([A-Za-z_][A-Za-z0-9_]*)\}"  # ${NAME}
     r"|\$([A-Za-z_][A-Za-z0-9_]*)"  # $NAME
@@ -376,13 +390,16 @@ def _expand_vars(text: str, env: dict[str, str], last_exit_code: int) -> str:
     """Expand ``$?``, ``$NAME``, and ``${NAME}`` in text.
 
     Unset variables expand to the empty string (POSIX).  ``\\$``
-    suppresses expansion and yields a literal ``$``.
+    suppresses expansion and yields a literal ``$``; ``\\\\`` yields a
+    literal backslash (so ``\\\\$NAME`` is a backslash plus expansion).
     """
-    if "$" not in text:
+    if "$" not in text and "\\\\" not in text:
         return text
 
     def repl(m: re.Match) -> str:
         s = m.group(0)
+        if s == "\\\\":
+            return "\\"
         if s == "\\$":
             return "$"
         if s == "$?":
