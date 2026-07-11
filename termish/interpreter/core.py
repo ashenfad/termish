@@ -77,6 +77,8 @@ BUILTINS: dict[str, CommandFunc] = {
     "tar": archive.tar,
     "gzip": archive.gzip,
     "gunzip": archive.gunzip,
+    "zcat": archive.zcat,
+    "gzcat": archive.zcat,
     "zip": archive.zip_cmd,
     "unzip": archive.unzip,
     # Inspection
