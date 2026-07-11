@@ -94,6 +94,19 @@ class TestVarExpansion:
         out = execute('echo "\\$NAME"', fs, env={"NAME": "alice"})
         assert out == "$NAME\n"
 
+    def test_escaped_backslash_before_dollar(self, fs):
+        # "\\$NAME": the first backslash escapes the second; $NAME is live
+        out = execute('echo "\\\\$NAME"', fs, env={"NAME": "alice"})
+        assert out == "\\alice\n"
+
+    def test_double_backslash_collapses_in_double_quotes(self, fs):
+        # bash double-quote rule: \\ -> \
+        assert execute('echo "a\\\\b"', fs) == "a\\b\n"
+
+    def test_single_backslash_untouched_in_double_quotes(self, fs):
+        # backslash is only special before '\' or '$': regex escapes survive
+        assert execute('echo "a\\.b"', fs) == "a\\.b\n"
+
     def test_expansion_in_redirect_target(self, fs):
         execute("echo hi > $OUT", fs, env={"OUT": "/o.txt"})
         assert fs.read("/o.txt") == b"hi\n"
@@ -104,6 +117,25 @@ class TestVarExpansion:
 
     def test_expansion_in_command_name(self, fs):
         assert execute("$CMD hello", fs, env={"CMD": "echo"}) == "hello\n"
+
+    def test_empty_command_name_shifts(self, fs):
+        # zsh-style: an empty-expanding command word shifts away
+        assert execute("$UNSET echo hi", fs) == "hi\n"
+
+    def test_all_words_empty_is_silent_noop(self, fs):
+        assert execute("$UNSET", fs) == ""
+        assert execute("$UNSET; echo $?", fs) == "0\n"
+
+    def test_multiword_command_name_does_not_split(self, fs):
+        # deliberately zsh, not bash: no field splitting of expansions
+        out = execute("$CMD; echo $?", fs, env={"CMD": "echo hello"})
+        assert out == "echo hello: command not found\n127\n"
+
+    def test_multiword_arg_does_not_split(self, fs):
+        # value with spaces stays ONE arg (zsh semantics; bash would split)
+        fs.write("/f.txt", b"a b\nc\n")
+        out = execute("grep $PAT /f.txt", fs, env={"PAT": "a b"})
+        assert out == "a b\n"
 
     def test_expanded_value_globs(self, fs):
         fs.write("/a.txt", b"")
