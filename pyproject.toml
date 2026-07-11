@@ -1,6 +1,6 @@
 [project]
 name = "termish"
-version = "0.1.7"
+version = "0.1.8"
 description = "Virtual terminal with shell-like commands over a pluggable filesystem."
 readme = "README.md"
 license = "MIT"

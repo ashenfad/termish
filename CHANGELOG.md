@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.8] - 2026-07-11
 
 ### Added
 - **Stderr redirects are honored** instead of parsed-and-discarded. `2>file` captures the command's stderr (creating/truncating the file even when no stderr is produced, as in bash), `2>>file` appends, `2>/dev/null` suppresses, and `2>&1` merges stderr into stdout so it flows through pipes -- the `cmd 2>&1 | head -30` idiom now delivers the error text downstream. A failure whose stderr went to a file still aborts the pipeline (silently -- the diagnostic was consumed); a `2>&1` failure keeps the pipeline going and the last stage decides the exit code (bash without pipefail: `cat /missing 2>&1 | wc -l; echo $?` prints ` 1` then `0`). Redirect targets undergo variable expansion. The parser now emits `Redirect` nodes with types `2>`, `2>>`, `2>&1`; other fd merges (`>&1`, `1>&2`, `2>&2`) remain vacuous no-ops.
