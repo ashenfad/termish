@@ -7,6 +7,7 @@ Parses and executes shell scripts (pipelines, redirects, semicolons) against any
 ## Features
 
 - **Shell parser** -- pipes, redirects (`>`, `>>`, `<`), heredocs (`<<EOF`), semicolons, quoted strings, line continuation
+- **Variable expansion** -- `$?` (last exit code), `$VAR` / `${VAR}` from an env dict; expands in unquoted and double-quoted contexts, literal in single quotes
 - **36 builtins** -- ls, cat, grep, find, sed, tr, sort, uniq, cut, wc, diff, tar, gzip, zcat, zip, jq, xargs, file, true, false, basename, dirname, ...
 - **Custom commands** -- inject your own command handlers alongside builtins; injected commands override builtins and compose in pipelines
 - **jq engine** -- built-in jq filter parser and evaluator (field access, pipes, functions, conditionals)
@@ -39,6 +40,27 @@ execute('echo \'{"name": "alice", "score": 42}\' > data.json', fs)
 output = execute('jq -r ".name" data.json', fs)
 print(output)  # alice
 ```
+
+## Variables
+
+`$?` expands to the last pipeline's exit code. `$VAR` / `${VAR}` read from
+an optional env dict, which is shared with command handlers via `ctx.env`
+-- mutations persist across commands (and across `execute()` calls if you
+reuse the dict):
+
+```python
+output = execute('cat /missing; echo "exit=$?"', fs)
+print(output)  # exit=1
+
+env = {"NAME": "alice"}
+output = execute("echo hello $NAME", fs, env=env)
+print(output)  # hello alice
+```
+
+Unset variables expand to the empty string. Single quotes suppress
+expansion (`'$?'` stays literal). Command substitution `$(...)` is not
+supported and raises `ParseError` rather than mangling silently.
+Heredoc bodies are never expanded.
 
 ## Custom commands
 
