@@ -17,8 +17,9 @@ _HD_KEY = "__termish_heredoc_{n}__"
 def _find_heredoc_ops(line: str) -> list[int]:
     """Positions of ``<<`` operators OUTSIDE quotes in a raw line.
 
-    termish has no expansion, so quote state is a simple two-flag
-    scan; backslash escapes the next char outside single quotes.
+    Expansion happens at execution time, never at parse time, so quote
+    state is a simple two-flag scan; backslash escapes the next char
+    outside single quotes.
     Triple ``<<<`` (herestring) is not supported and is skipped so it
     falls through to the tokenizer as a normal parse problem.
     """
@@ -66,8 +67,9 @@ def _extract_heredocs(text: str) -> tuple[str, dict[str, tuple[str, str]]]:
     replaced with ``<< __termish_heredoc_N__`` and the body (the lines
     following the command line, up to the delimiter line) is stored in
     the returned map as ``key -> (delimiter, body)``. Bodies are raw:
-    no expansion, quotes and operators inert (termish has no variable
-    expansion, so quoted and unquoted delimiters behave identically).
+    never expanded, quotes and operators inert (bodies behave as if the
+    delimiter were quoted, so quoted and unquoted delimiters are
+    identical — unlike bash, which expands under unquoted delimiters).
     The delimiter line matches exactly or whitespace-stripped (agents
     indent). Multiple heredocs on one line consume bodies in order.
 
@@ -180,6 +182,16 @@ def to_script(text: str) -> Script:
     # This preserves "'*'" as "'*'" in the token stream instead of "*"
     masked_text, mask_map = mask_quotes(text)
 
+    # Command substitution is unsupported; fail loudly rather than let
+    # "$(cmd)" tokenize into mangled args ("$", "(", "cmd", ")") or pass
+    # through unexpanded inside double quotes.  Single-quoted "$(...)"
+    # stays a harmless literal, exactly as in bash.
+    if "$(" in masked_text or any(v[0] == '"' and "$(" in v for v in mask_map.values()):
+        raise ParseError(
+            "Command substitution '$(...)' is not supported; "
+            "run the inner command separately"
+        )
+
     # Configure shlex to handle shell punctuation as separate tokens
     # punctuation_chars=True ensures "ls|grep" becomes ["ls", "|", "grep"]
     lexer = shlex.shlex(masked_text, posix=True, punctuation_chars=True)
@@ -188,7 +200,9 @@ def to_script(text: str) -> Script:
     # excludes several characters which are NOT shell operators and should
     # be treated as part of words.  Without this, "user@host" splits into
     # ["user", "@", "host"], "100%" into ["100", "%"], etc.
-    lexer.wordchars += ":@,%+!^"
+    # "$?{}" keeps variable forms ("$?", "$NAME", "${NAME}") intact as
+    # single words for execution-time expansion.
+    lexer.wordchars += ":@,%+!^$?{}"
 
     # Treat newlines as tokens, not whitespace, so we can use them as separators
     lexer.whitespace = " \t\r"

@@ -8,7 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Variable expansion.** `$?` expands to the previous pipeline's exit code; `$VAR` / `${VAR}` read from an optional env dict (`execute(..., env=...)`). Expansion is execution-time and quote-aware: unquoted and double-quoted contexts expand, single quotes stay literal, `\$` escapes. Unset variables expand to empty and an unquoted arg that expands to nothing is removed (bash word removal). Expansion also applies to command names and redirect targets, and expanded values still glob (`echo $PAT` with `PAT=*.txt`). Unrecognized `$` forms (`$1`, `$$`, trailing `grep foo$` anchors) stay literal. The env dict is shared with handlers via `ctx.env` -- mutations are visible to later commands and persist across `execute()` calls when the caller reuses the dict. Closes the `cmd; echo exit=$?` gap where agents saw a literal `$?` and concluded the command hung.
 - **`zcat`** / **`gzcat`** builtins -- decompress gzip files to stdout (equivalent to `gzip -dc`). Unlike `gzip -d`, no `.gz` suffix is required. Both names map to the same handler (Linux agents type `zcat`, macOS-trained ones `gzcat`). File arguments only -- piping compressed bytes via stdin is not supported (pipelines are text-based).
+
+### Changed
+- **Command substitution `$(...)` now raises `ParseError`** ("not supported; run the inner command separately") in unquoted and double-quoted contexts instead of tokenizing into mangled args (`$`, `(`, `cmd`, `)`). Single-quoted `'$(...)'` remains a literal, as in bash.
+- **Quoted command names and redirect targets are now unquoted before resolution** (`"ls" -la` works; `echo hi > "my file.txt"` writes to `my file.txt`, not a file with quotes in its name).
+- **Tokenizer**: `$`, `?`, `{`, `}` are now word characters, so `$?`, `${NAME}`, and `file?.txt` stay single tokens instead of splitting.
 
 ## [0.1.7] - 2026-07-05
 

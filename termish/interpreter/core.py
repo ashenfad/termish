@@ -5,6 +5,7 @@ Functional implementation.
 
 import contextvars
 import io
+import re
 from collections.abc import Mapping
 from typing import TextIO
 
@@ -93,6 +94,7 @@ def execute_script(
     script: Script,
     fs: FileSystem,
     commands: Mapping[str, CommandFunc] | None = None,
+    env: dict[str, str] | None = None,
 ) -> str:
     """
     Execute a full script and return the final stdout.
@@ -108,6 +110,10 @@ def execute_script(
         commands: Optional mapping of injected command handlers.
             Injected commands override built-ins when names collide.
             Defaults to no injected commands.
+        env: Optional environment variables for ``$VAR`` expansion.
+            The dict is shared with command handlers via ``ctx.env``,
+            so handler mutations are visible to later commands and to
+            the caller. Defaults to an empty environment.
 
     Returns:
         Captured stdout as a string.
@@ -115,23 +121,27 @@ def execute_script(
     Raises:
         TerminalError: If the last executed pipeline failed (contains partial output).
     """
+    if env is None:
+        env = {}
+
     # Only set the context var if commands is explicitly provided.
     # When None, nested calls inherit the parent's injected commands.
     if commands is None:
-        return _execute_script_inner(script, fs)
+        return _execute_script_inner(script, fs, env)
 
     token = _injected_commands.set(commands)
     try:
-        return _execute_script_inner(script, fs)
+        return _execute_script_inner(script, fs, env)
     finally:
         _injected_commands.reset(token)
 
 
-def _execute_script_inner(script: Script, fs: FileSystem) -> str:
+def _execute_script_inner(script: Script, fs: FileSystem, env: dict[str, str]) -> str:
     """Inner execution loop (injected commands already set via context var)."""
     final_output = io.StringIO()
     last_succeeded = True
     last_error: TerminalError | None = None
+    last_exit_code = 0  # what "$?" expands to
 
     for i, pipeline in enumerate(script.pipelines):
         # Determine whether to execute this pipeline based on the preceding operator
@@ -144,15 +154,18 @@ def _execute_script_inner(script: Script, fs: FileSystem) -> str:
             # ";" always executes
 
         try:
-            _execute_pipeline(pipeline, fs, final_output)
+            _execute_pipeline(pipeline, fs, final_output, env, last_exit_code)
             last_succeeded = True
             last_error = None
+            last_exit_code = 0
         except TerminalError as e:
             last_succeeded = False
             last_error = e
+            last_exit_code = e.exit_code
         except Exception as e:
             last_succeeded = False
             last_error = TerminalError(f"Unexpected error: {e}")
+            last_exit_code = 1
 
     if last_error is not None:
         raise TerminalError(
@@ -164,7 +177,13 @@ def _execute_script_inner(script: Script, fs: FileSystem) -> str:
     return final_output.getvalue()
 
 
-def _execute_pipeline(pipeline: Pipeline, fs: FileSystem, stdout: TextIO):
+def _execute_pipeline(
+    pipeline: Pipeline,
+    fs: FileSystem,
+    stdout: TextIO,
+    env: dict[str, str],
+    last_exit_code: int,
+):
     """
     Execute a chain of commands.
     Raises TerminalError on failure.
@@ -178,6 +197,8 @@ def _execute_pipeline(pipeline: Pipeline, fs: FileSystem, stdout: TextIO):
         cmd_stdin = io.StringIO(current_input) if current_input else io.StringIO()
         cmd_stdout = io.StringIO()
 
+        cmd_name = _expand_word(cmd_node.name, env, last_exit_code)
+
         # Handle Redirects (Input) — last input-ish redirect wins (bash)
         input_redirect = next(
             (r for r in reversed(cmd_node.redirects) if r.type in ("<", "<<")),
@@ -185,42 +206,47 @@ def _execute_pipeline(pipeline: Pipeline, fs: FileSystem, stdout: TextIO):
         )
         if input_redirect is not None:
             if input_redirect.type == "<<":
+                # Heredoc bodies are always literal (as if the delimiter
+                # were quoted) — no expansion.
                 cmd_stdin = io.StringIO(input_redirect.content or "")
             else:
-                path = resolve_path(input_redirect.target, fs)
+                target = _expand_word(input_redirect.target, env, last_exit_code)
+                path = resolve_path(target, fs)
                 try:
                     content_bytes = fs.read(path)
                     content_str = content_bytes.decode("utf-8", errors="replace")
                     cmd_stdin = io.StringIO(content_str)
                 except Exception as e:
-                    raise TerminalError(
-                        f"{cmd_node.name}: {input_redirect.target}: {e}"
-                    )
+                    raise TerminalError(f"{cmd_name}: {target}: {e}")
 
         # Prepare Args
-        expanded_args = _expand_args(cmd_node.args, fs)
+        expanded_args = _expand_args(cmd_node.args, fs, env, last_exit_code)
 
         # Execute Command — injected commands override built-ins
-        cmd_func = _resolve_command(cmd_node.name)
+        cmd_func = _resolve_command(cmd_name)
         if cmd_func is not None:
             try:
                 ctx = CommandContext(
-                    args=expanded_args, stdin=cmd_stdin, stdout=cmd_stdout, fs=fs
+                    args=expanded_args,
+                    stdin=cmd_stdin,
+                    stdout=cmd_stdout,
+                    fs=fs,
+                    env=env,
                 )
                 result = cmd_func(ctx)
                 if result is not None and result.exit_code != 0:
                     raise TerminalError(
-                        f"{cmd_node.name}: {result.stderr}"
+                        f"{cmd_name}: {result.stderr}"
                         if result.stderr
-                        else f"{cmd_node.name}: exited with code {result.exit_code}",
+                        else f"{cmd_name}: exited with code {result.exit_code}",
                         exit_code=result.exit_code,
                     )
             except TerminalError:
                 raise
             except Exception as e:
-                raise TerminalError(f"{cmd_node.name}: execution error: {e}")
+                raise TerminalError(f"{cmd_name}: execution error: {e}")
         else:
-            raise TerminalError(f"{cmd_node.name}: command not found", exit_code=127)
+            raise TerminalError(f"{cmd_name}: command not found", exit_code=127)
 
         # Capture output
         output_content = cmd_stdout.getvalue()
@@ -230,11 +256,12 @@ def _execute_pipeline(pipeline: Pipeline, fs: FileSystem, stdout: TextIO):
 
         if output_redirects:
             for r in output_redirects:
-                path = resolve_path(r.target, fs)
+                target = _expand_word(r.target, env, last_exit_code)
+                path = resolve_path(target, fs)
                 try:
                     _write_to_file(path, output_content, r.type == ">>", fs)
                 except Exception as e:
-                    raise TerminalError(f"{cmd_node.name}: redirect failed: {e}")
+                    raise TerminalError(f"{cmd_name}: redirect failed: {e}")
             current_input = ""
         else:
             current_input = output_content
@@ -243,23 +270,97 @@ def _execute_pipeline(pipeline: Pipeline, fs: FileSystem, stdout: TextIO):
         stdout.write(current_input)
 
 
-def _expand_args(args: list[str], fs: FileSystem) -> list[str]:
-    """Perform globbing on arguments."""
+# Variable forms recognized at expansion time.  Anything else involving
+# '$' (e.g. "$(", "$1", "$$", a trailing "grep foo$" anchor) is left
+# literal — visible non-support beats silent mangling.
+_VAR_RE = re.compile(
+    r"\\\$"  # escaped dollar -> literal $
+    r"|\$\?"  # last exit code
+    r"|\$\{([A-Za-z_][A-Za-z0-9_]*)\}"  # ${NAME}
+    r"|\$([A-Za-z_][A-Za-z0-9_]*)"  # $NAME
+)
+
+
+def _expand_vars(text: str, env: dict[str, str], last_exit_code: int) -> str:
+    """Expand ``$?``, ``$NAME``, and ``${NAME}`` in text.
+
+    Unset variables expand to the empty string (POSIX).  ``\\$``
+    suppresses expansion and yields a literal ``$``.
+    """
+    if "$" not in text:
+        return text
+
+    def repl(m: re.Match) -> str:
+        s = m.group(0)
+        if s == "\\$":
+            return "$"
+        if s == "$?":
+            return str(last_exit_code)
+        name = m.group(1) or m.group(2)
+        return env.get(name, "")
+
+    return _VAR_RE.sub(repl, text)
+
+
+def _expand_masked(
+    masked: str,
+    mask_map: dict[str, str],
+    env: dict[str, str],
+    last_exit_code: int,
+) -> str:
+    """Variable-expand a quote-masked word, honoring quote semantics.
+
+    The unquoted portion and the contents of double-quoted regions are
+    expanded; single-quoted regions stay literal.  Returns the masked
+    text (mask_map is updated in place for expanded regions).
+    """
+    masked = _expand_vars(masked, env, last_exit_code)
+    for token, original in mask_map.items():
+        if original[0] == '"':
+            inner = _expand_vars(original[1:-1], env, last_exit_code)
+            mask_map[token] = '"' + inner + '"'
+    return masked
+
+
+def _expand_word(word: str, env: dict[str, str], last_exit_code: int) -> str:
+    """Expand variables in a single word (command name or redirect target)
+    and strip quotes.  No globbing, no word removal."""
+    masked, mask_map = mask_quotes(word)
+    masked = _expand_masked(masked, mask_map, env, last_exit_code)
+    return unmask_and_unquote(masked, mask_map)
+
+
+def _expand_args(
+    args: list[str],
+    fs: FileSystem,
+    env: dict[str, str],
+    last_exit_code: int,
+) -> list[str]:
+    """Perform variable expansion and globbing on arguments.
+
+    Variables expand first (so ``$?`` never reads as a glob ``?``), then
+    fully-unquoted args containing wildcards are globbed.  An unquoted
+    arg that expands to nothing is removed entirely (bash word removal:
+    ``echo a $UNSET b`` has two args, not three).
+    """
     expanded: list[str] = []
     for arg in args:
         masked, mask_map = mask_quotes(arg)
+        masked = _expand_masked(masked, mask_map, env, last_exit_code)
 
-        if ("*" in masked or "?" in masked) and not mask_map:
-            try:
-                matches = fs.glob(arg)
-                if matches:
-                    expanded.extend(matches)
-                else:
-                    expanded.append(arg)
-            except Exception:
-                expanded.append(arg)
-        else:
-            expanded.append(unmask_and_unquote(masked, mask_map))
+        if not mask_map:
+            # Fully unquoted: word removal, then globbing
+            if masked == "" and arg != "":
+                continue
+            if "*" in masked or "?" in masked:
+                try:
+                    matches = fs.glob(masked)
+                    expanded.extend(matches if matches else [masked])
+                except Exception:
+                    expanded.append(masked)
+                continue
+
+        expanded.append(unmask_and_unquote(masked, mask_map))
 
     return expanded
 

@@ -34,6 +34,7 @@ def execute(
     script_text: str,
     fs: FileSystem,
     commands: Mapping[str, CommandFunc] | None = None,
+    env: dict[str, str] | None = None,
 ) -> str:
     """Parse and execute a shell script against a filesystem.
 
@@ -42,6 +43,10 @@ def execute(
         fs: Filesystem to operate on.
         commands: Optional mapping of injected command handlers.
             Injected commands override built-ins when names collide.
+        env: Optional environment variables for ``$VAR`` expansion.
+            The dict is shared with command handlers via ``ctx.env``;
+            mutations are visible to later commands and to the caller,
+            so a long-lived dict carries state across execute() calls.
 
     Returns:
         Captured stdout as a string.
@@ -50,4 +55,4 @@ def execute(
         TerminalError: If a command fails.
         ParseError: If the script has invalid syntax.
     """
-    return execute_script(to_script(script_text), fs, commands=commands)
+    return execute_script(to_script(script_text), fs, commands=commands, env=env)

@@ -33,7 +33,9 @@ class CommandContext:
     """The filesystem to operate on."""
 
     env: dict[str, str] = field(default_factory=dict)
-    """Environment variables (reserved for future use)."""
+    """Environment variables backing ``$VAR`` expansion.  Shared across
+    all commands in a script (and with the caller's dict passed via
+    ``execute(env=...)``), so mutations are visible to later commands."""
 
 
 @dataclass
