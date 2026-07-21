@@ -178,14 +178,37 @@ class TestErrorPropagation:
             execute("bad_cmd", fs, commands={"bad_cmd": bad_cmd})
 
     def test_command_result_nonzero_exit_code(self, fs):
-        """CommandResult with non-zero exit_code raises TerminalError."""
+        """CommandResult with non-zero exit_code raises TerminalError,
+        and the output it printed BEFORE failing survives on the raised
+        error. A real terminal shows what a command wrote before it
+        exited nonzero — the load-bearing case is an HTTP client that
+        writes an error body and then exits on the status, where the
+        body IS the explanation."""
 
         def failing(ctx: CommandContext) -> CommandResult | None:
             ctx.stdout.write("partial output\n")
-            return CommandResult(exit_code=1, stderr="disk full")
+            return CommandResult(exit_code=22, stderr="HTTP 404")
 
-        with pytest.raises(TerminalError, match="disk full"):
+        with pytest.raises(TerminalError, match="HTTP 404") as e:
             execute("failing", fs, commands={"failing": failing})
+        assert e.value.partial_output == "partial output\n"
+        assert e.value.exit_code == 22
+
+    def test_failing_command_output_surfaces_over_a_redirect(self, fs):
+        """A failing command aborts before its `>` redirect is applied
+        (termish processes redirects post-return), so the body it wrote
+        surfaces in the transcript rather than the file. Before this
+        flush it was lost to both — the transcript is the strict
+        improvement, and the more useful place for an error the agent
+        needs to read."""
+
+        def failing(ctx: CommandContext) -> CommandResult | None:
+            ctx.stdout.write("body\n")
+            return CommandResult(exit_code=22, stderr="HTTP 404")
+
+        with pytest.raises(TerminalError) as e:
+            execute("failing > out.txt", fs, commands={"failing": failing})
+        assert e.value.partial_output == "body\n"
 
     def test_command_result_zero_exit_code_succeeds(self, fs):
         """CommandResult with exit_code=0 is treated as success."""
