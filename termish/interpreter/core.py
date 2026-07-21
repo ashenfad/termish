@@ -200,6 +200,21 @@ def _execute_script_inner(script: Script, fs: FileSystem, env: dict[str, str]) -
     return final_output.getvalue()
 
 
+def _flush_partial(cmd_stdout: io.StringIO, stdout: TextIO) -> None:
+    """Move a failing command's own stdout to the transcript.
+
+    A command writes into its private ``cmd_stdout``, which is normally
+    drained further down (pipe it onward, or write it out). Raising
+    jumps past that drain, so anything the command printed before it
+    failed would vanish — but a real shell still shows it. The case
+    that matters: an HTTP client writing an error BODY and then exiting
+    nonzero on the status. Losing the body loses the explanation.
+    """
+    text = cmd_stdout.getvalue()
+    if text:
+        stdout.write(text)
+
+
 def _execute_pipeline(
     pipeline: Pipeline,
     fs: FileSystem,
@@ -290,11 +305,13 @@ def _execute_pipeline(
                 )
         except TerminalError as e:
             if stderr_redirect is None:
+                _flush_partial(cmd_stdout, stdout)
                 raise
             failure = e
         except Exception as e:
             wrapped = TerminalError(f"{cmd_name}: execution error: {e}")
             if stderr_redirect is None:
+                _flush_partial(cmd_stdout, stdout)
                 raise wrapped
             failure = wrapped
 
@@ -335,6 +352,7 @@ def _execute_pipeline(
         # the merged text (the agent idiom ``cmd 2>&1 | head``); if it's
         # the final stage, the failure resurfaces after the loop.
         if failure is not None and stderr_redirect.type != "2>&1":
+            _flush_partial(cmd_stdout, stdout)
             raise TerminalError(failure.message, exit_code=failure.exit_code, stderr="")
         merged_failure = failure  # only ever non-None for "2>&1"
 

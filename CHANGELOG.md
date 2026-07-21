@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **A failing command's own stdout now surfaces** instead of vanishing. A command writes into a private buffer that is normally drained at the end of the pipeline step; raising on a nonzero `CommandResult` jumped past that drain, so anything written *before* the failure was lost — even to `-i` / `2>&1` / a following pipe. The load-bearing case is an HTTP-client builtin (nontainer's `curl`) that writes a JSON error **body** and then exits 22 on the status: the body carries the actual explanation (`endpoints are module names WITHOUT .py: try /api/ev`), and it was invisible, leaving only `HTTP 404`. The output is now flushed to the transcript on the aborting raise, carried on `TerminalError.partial_output` as before. Exit codes and `&&`/`||` short-circuiting are unchanged. Edge: a failing command with a `> file` redirect aborts before the redirect is applied (redirects are processed post-return), so its body surfaces in the transcript rather than the file — previously lost to both.
+
 ## [0.1.8] - 2026-07-11
 
 ### Added
