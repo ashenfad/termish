@@ -256,6 +256,37 @@ class TestFindExec:
         assert "aaa" in out
         assert "bbb" in out
 
+    def test_exec_preserves_successful_stderr_before_stdout(self, fs):
+        fs.write("/a.txt", b"")
+
+        def warn(ctx: CommandContext) -> CommandResult:
+            ctx.stdout.write("output\n")
+            return CommandResult(stderr="warning")
+
+        out = execute_script(
+            to_script("find / -type f -exec warn '{}' ';'"),
+            fs,
+            commands={"warn": warn},
+        )
+
+        assert out == "warning\noutput\n"
+
+    def test_exec_batch_preserves_successful_stderr_before_stdout(self, fs):
+        fs.write("/a.txt", b"")
+        fs.write("/b.txt", b"")
+
+        def warn(ctx: CommandContext) -> CommandResult:
+            ctx.stdout.write("output\n")
+            return CommandResult(stderr="warning")
+
+        out = execute_script(
+            to_script("find / -type f -exec warn '{}' '+'"),
+            fs,
+            commands={"warn": warn},
+        )
+
+        assert out == "warning\noutput\n"
+
     def test_exec_passes_metacharacter_paths_as_single_arguments(self, fs):
         paths = [
             "/amp&capture",

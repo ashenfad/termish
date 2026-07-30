@@ -892,7 +892,13 @@ def find(ctx: CommandContext) -> CommandResult | None:
         except Exception as e:
             raise TerminalError(f"{cmd_name}: execution error: {e}")
 
-        return cmd_stdout.getvalue()
+        output = cmd_stdout.getvalue()
+        if result is not None and result.stderr:
+            diagnostic = (
+                result.stderr if result.stderr.endswith("\n") else result.stderr + "\n"
+            )
+            return diagnostic + output
+        return output
 
     predicate = _parse_find_predicates(
         predicate_tokens, stdout=stdout, executor=_executor
