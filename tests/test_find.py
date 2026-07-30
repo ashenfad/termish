@@ -1,5 +1,6 @@
 import pytest
 
+from termish.context import CommandContext, CommandResult
 from termish.errors import TerminalError
 from termish.fs import MemoryFS
 from termish.interpreter import execute_script
@@ -254,6 +255,61 @@ class TestFindExec:
         out = execute_script(to_script("find / -type f -exec cat '{}' '+'"), fs)
         assert "aaa" in out
         assert "bbb" in out
+
+    def test_exec_passes_metacharacter_paths_as_single_arguments(self, fs):
+        paths = [
+            "/amp&capture",
+            "/pipe|capture",
+            "/redirect>owned",
+            "/semi;capture",
+            "/space name.txt",
+        ]
+        for path in paths:
+            fs.write(path, b"")
+
+        calls: list[list[str]] = []
+
+        def capture(ctx: CommandContext) -> CommandResult | None:
+            calls.append(ctx.args)
+            return None
+
+        execute_script(
+            to_script("find / -type f -exec capture '{}' ';'"),
+            fs,
+            commands={"capture": capture},
+        )
+
+        assert len(calls) == len(paths)
+        assert all(len(args) == 1 for args in calls)
+        assert sorted(args[0] for args in calls) == sorted(paths)
+        assert not fs.exists("/owned")
+
+    def test_exec_batch_passes_paths_as_distinct_arguments(self, fs):
+        paths = [
+            "/amp&capture",
+            "/pipe|capture",
+            "/redirect>owned",
+            "/semi;capture",
+            "/space name.txt",
+        ]
+        for path in paths:
+            fs.write(path, b"")
+
+        calls: list[list[str]] = []
+
+        def capture(ctx: CommandContext) -> CommandResult | None:
+            calls.append(ctx.args)
+            return None
+
+        execute_script(
+            to_script("find / -type f -exec capture '{}' '+'"),
+            fs,
+            commands={"capture": capture},
+        )
+
+        assert len(calls) == 1
+        assert sorted(calls[0]) == sorted(paths)
+        assert not fs.exists("/owned")
 
     def test_exec_missing_semicolon(self, fs):
         with pytest.raises(TerminalError, match="terminating"):
