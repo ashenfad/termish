@@ -526,18 +526,6 @@ class _SizePred(_FindPred):
         return item.size == self.threshold
 
 
-def _shell_join(tokens: list[str]) -> str:
-    """Join tokens into a shell command, quoting any that contain spaces."""
-    parts = []
-    for tok in tokens:
-        if " " in tok or "\t" in tok:
-            # Use single quotes, escaping any existing single quotes
-            parts.append("'" + tok.replace("'", "'\\''") + "'")
-        else:
-            parts.append(tok)
-    return " ".join(parts)
-
-
 class _ExecPred(_FindPred):
     """Run a command for each match (action predicate).
 
@@ -553,7 +541,7 @@ class _ExecPred(_FindPred):
         self,
         cmd_tokens: list[str],
         stdout: TextIO,
-        executor: Callable[[str, FileSystem], str],
+        executor: Callable[[list[str], FileSystem], str],
     ) -> None:
         self.cmd_tokens = cmd_tokens
         self.stdout = stdout
@@ -564,9 +552,8 @@ class _ExecPred(_FindPred):
             return True
         # Build command with {} replaced by the item path
         expanded = [tok.replace("{}", item.path) for tok in self.cmd_tokens]
-        cmd_str = _shell_join(expanded)
         try:
-            output = self.executor(cmd_str, fs)
+            output = self.executor(expanded, fs)
             if output:
                 self.stdout.write(output)
         except Exception:
@@ -587,7 +574,7 @@ class _ExecBatchPred(_FindPred):
         self,
         cmd_tokens: list[str],
         stdout: TextIO,
-        executor: Callable[[str, FileSystem], str],
+        executor: Callable[[list[str], FileSystem], str],
     ) -> None:
         self.cmd_tokens = cmd_tokens
         self.stdout = stdout
@@ -609,9 +596,8 @@ class _ExecBatchPred(_FindPred):
                 expanded.extend(self.collected)
             else:
                 expanded.append(tok)
-        cmd_str = _shell_join(expanded)
         try:
-            output = self.executor(cmd_str, fs)
+            output = self.executor(expanded, fs)
             if output:
                 self.stdout.write(output)
         except Exception:
@@ -671,7 +657,7 @@ def _has_action(pred: _FindPred) -> bool:
 def _parse_find_predicates(
     tokens: list[str],
     stdout: TextIO | None = None,
-    executor: Callable[[str, FileSystem], str] | None = None,
+    executor: Callable[[list[str], FileSystem], str] | None = None,
 ) -> _FindPred:
     """Parse find predicate tokens into an expression tree.
 
@@ -873,11 +859,40 @@ def find(ctx: CommandContext) -> CommandResult | None:
             i += 1
 
     # Build executor for -exec predicates (deferred import to avoid circular dep)
-    def _executor(cmd_str: str, executor_fs: FileSystem) -> str:
-        from termish.interpreter.core import execute_script
-        from termish.parser import to_script
+    def _executor(argv: list[str], executor_fs: FileSystem) -> str:
+        """Dispatch an already-tokenized command without shell reparsing."""
+        from termish.interpreter.core import _resolve_command
 
-        return execute_script(to_script(cmd_str), executor_fs)
+        cmd_name, *cmd_args = argv
+        cmd_func = _resolve_command(cmd_name)
+        if cmd_func is None:
+            raise TerminalError(f"{cmd_name}: command not found", exit_code=127)
+
+        cmd_stdout = io.StringIO()
+        try:
+            result = cmd_func(
+                CommandContext(
+                    args=cmd_args,
+                    stdin=io.StringIO(),
+                    stdout=cmd_stdout,
+                    fs=executor_fs,
+                    env=ctx.env,
+                )
+            )
+            if result is not None and result.exit_code != 0:
+                raise TerminalError(
+                    f"{cmd_name}: {result.stderr}"
+                    if result.stderr
+                    else f"{cmd_name}: exited with code {result.exit_code}",
+                    exit_code=result.exit_code,
+                    stderr=result.stderr,
+                )
+        except TerminalError:
+            raise
+        except Exception as e:
+            raise TerminalError(f"{cmd_name}: execution error: {e}")
+
+        return cmd_stdout.getvalue()
 
     predicate = _parse_find_predicates(
         predicate_tokens, stdout=stdout, executor=_executor
