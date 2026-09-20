@@ -8,6 +8,7 @@ Parses and executes shell scripts (pipelines, redirects, semicolons) against any
 
 - **Shell parser** -- pipes, redirects (`>`, `>>`, `<`, `2>`, `2>>`, `2>&1`), heredocs (`<<EOF`), semicolons, quoted strings, line continuation
 - **Variable expansion** -- `$?` (last exit code), `$VAR` / `${VAR}` from an env dict; expands in unquoted and double-quoted contexts, literal in single quotes
+- **Binary-safe pipelines** -- pipes and redirects carry bytes, so `cat bin.dat > copy.dat` is byte-identical and `cat file.gz | zcat` works; text decoding happens at each command's own boundary, and the returned transcript is decoded once for display
 - **Terminal-faithful transcript** -- stderr diagnostics appear in the returned output when execution continues past a failure (`cmd; next`, `cmd || rescue`), like a real terminal screen; a failure with nothing after it raises `TerminalError`. Stderr redirects are honored: `2>file` captures, `2>/dev/null` suppresses, `2>&1` merges into the pipe (`cmd 2>&1 | head` works)
 - **37 builtins** -- ls, cat, echo, printf, grep, find, sed, tr, sort, uniq, cut, wc, diff, tar, gzip, zcat, zip, jq, xargs, file, true, false, basename, dirname, ...
 - **Custom commands** -- inject your own command handlers alongside builtins; injected commands override builtins and compose in pipelines
@@ -104,6 +105,8 @@ print(output)  # 12
 ```
 
 All commands — builtin and injected — use the same `CommandContext` signature. See `CommandContext`, `CommandResult`, and `CommandFunc` in `termish.context` and `termish.errors`.
+
+`ctx.stdin` and `ctx.stdout` are text streams over the bytes the pipeline carries: `ctx.stdout.buffer.write(data)` emits bytes that reach the next stage or a `> file` redirect unchanged, and `ctx.stdin.buffer.read()` consumes them unchanged. Flush the text side before switching to `.buffer` on the same stream.
 
 ## FileSystem protocol
 
