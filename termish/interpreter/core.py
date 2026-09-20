@@ -54,6 +54,7 @@ BUILTINS: dict[str, CommandFunc] = {
     "dirname": filesystem.dirname,
     # I/O
     "echo": io_cmds.echo,
+    "printf": io_cmds.printf,
     "cat": io_cmds.cat,
     "head": io_cmds.head,
     "tail": io_cmds.tail,

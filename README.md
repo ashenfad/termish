@@ -9,7 +9,7 @@ Parses and executes shell scripts (pipelines, redirects, semicolons) against any
 - **Shell parser** -- pipes, redirects (`>`, `>>`, `<`, `2>`, `2>>`, `2>&1`), heredocs (`<<EOF`), semicolons, quoted strings, line continuation
 - **Variable expansion** -- `$?` (last exit code), `$VAR` / `${VAR}` from an env dict; expands in unquoted and double-quoted contexts, literal in single quotes
 - **Terminal-faithful transcript** -- stderr diagnostics appear in the returned output when execution continues past a failure (`cmd; next`, `cmd || rescue`), like a real terminal screen; a failure with nothing after it raises `TerminalError`. Stderr redirects are honored: `2>file` captures, `2>/dev/null` suppresses, `2>&1` merges into the pipe (`cmd 2>&1 | head` works)
-- **36 builtins** -- ls, cat, grep, find, sed, tr, sort, uniq, cut, wc, diff, tar, gzip, zcat, zip, jq, xargs, file, true, false, basename, dirname, ...
+- **37 builtins** -- ls, cat, echo, printf, grep, find, sed, tr, sort, uniq, cut, wc, diff, tar, gzip, zcat, zip, jq, xargs, file, true, false, basename, dirname, ...
 - **Custom commands** -- inject your own command handlers alongside builtins; injected commands override builtins and compose in pipelines
 - **jq engine** -- built-in jq filter parser and evaluator (field access, pipes, functions, conditionals)
 - **Pluggable filesystem** -- `FileSystem` is a `typing.Protocol`; any object with the right methods works
@@ -142,7 +142,7 @@ That is not a coincidence, and it is a promise: termish's `FileSystem` protocol 
 | Category | Commands |
 |----------|----------|
 | Filesystem | `pwd`, `cd`, `mkdir`, `ls`, `touch`, `cp`, `mv`, `rm`, `basename`, `dirname` |
-| I/O | `echo`, `cat`, `head`, `tail`, `tee` |
+| I/O | `echo`, `printf`, `cat`, `head`, `tail`, `tee` |
 | Search | `grep`, `find` |
 | Text | `wc`, `sort`, `uniq`, `cut`, `sed`, `tr` |
 | Diff | `diff` |
