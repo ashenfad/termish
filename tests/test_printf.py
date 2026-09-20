@@ -121,12 +121,36 @@ class TestInvalidNumber:
         out = execute(r"printf '%d' '' || true", fs)
         assert out == "0printf: : invalid number\n"
 
+    @pytest.mark.parametrize("operand", ["08", "09", "-08", "+019"])
+    def test_leading_zero_with_a_non_octal_digit_is_invalid(self, fs, operand):
+        # bash: a leading zero makes the operand octal, and octal has no
+        # 8 or 9, so this is an invalid number rather than decimal eight.
+        out = execute(rf"printf '%d\n' {operand}; echo exit=$?", fs)
+        assert out == f"0\nprintf: {operand}: invalid number\nexit=1\n"
+
+    def test_leading_zero_octal_still_converts(self, fs):
+        assert execute(r"printf '%d %d' 010 -010", fs) == "8 -8"
+
     def test_failure_is_the_script_outcome(self, fs):
         with pytest.raises(TerminalError) as exc:
             execute(r"printf '%d' abc", fs)
         assert exc.value.exit_code == 1
         assert exc.value.stderr == "printf: abc: invalid number"
         assert exc.value.partial_output == "0"
+
+
+class TestEndOfOptions:
+    def test_double_dash_is_dropped(self, fs):
+        # bash: ``--`` ends the options, so the next word is the format.
+        assert execute(r"printf -- '%s\n' x", fs) == "x\n"
+
+    def test_double_dash_alone_is_a_usage_error(self, fs):
+        with pytest.raises(TerminalError) as exc:
+            execute("printf --", fs)
+        assert "usage" in exc.value.message
+
+    def test_double_dash_as_a_later_word_is_data(self, fs):
+        assert execute(r"printf '%s|' -- x", fs) == "--|x|"
 
 
 class TestUsageErrors:
