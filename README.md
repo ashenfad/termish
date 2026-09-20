@@ -72,7 +72,10 @@ as a missing command, which is what a `for` loop used to do three
 times over. Use `xargs` or `find -exec` to iterate and `&&` / `||` for
 conditionals, and inject anything more involved as a custom command.
 Only command position counts: `echo for`, `grep -r done .`, a file
-named `for`, and quoted `'for'` are all ordinary words.
+named `for`, and quoted `'for'` are all ordinary words. Quoting is
+the way to run a custom command whose name collides with a keyword;
+a backslash does not do it here (`\for` is still `for`), where bash
+would accept either.
 
 Expansions are **never field-split** -- this is zsh's behavior, not
 bash's, and it's deliberate: a value with spaces stays one argument
