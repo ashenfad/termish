@@ -13,6 +13,42 @@ class ParseError(Exception):
 
 _HD_KEY = "__termish_heredoc_{n}__"
 
+# Shell control flow is not implemented.  These words are recognized only
+# to fail with one clear diagnostic instead of several bogus
+# "command not found" lines (a `for` loop otherwise reports `for`, `do`
+# and `done` as three missing commands).  The openers and the bare
+# closers/continuers are equally unsupported, so both are listed.
+_LOOP_KEYWORDS = frozenset({"for", "while", "until", "do", "done"})
+_CONDITIONAL_KEYWORDS = frozenset({"if", "then", "elif", "else", "fi"})
+_CASE_KEYWORDS = frozenset({"case", "esac"})
+_CONTROL_FLOW_KEYWORDS = _LOOP_KEYWORDS | _CONDITIONAL_KEYWORDS | _CASE_KEYWORDS
+
+_FUNCTION_ADVICE = (
+    "function definitions are not supported; "
+    "inject reusable commands through execute()'s 'commands' argument"
+)
+
+
+def _reject_control_flow(word: str) -> None:
+    """Raise ``ParseError`` if ``word`` is a control-flow keyword.
+
+    Call this only for a word in command position -- the first word of a
+    pipeline segment.  Elsewhere these words are ordinary arguments
+    (``echo for``, ``grep -r done .``, a file named ``if``).  Quoted
+    words never reach here as themselves: the caller passes the masked
+    token, and a masked token is an opaque placeholder.
+    """
+    if word in _CONTROL_FLOW_KEYWORDS:
+        if word in _LOOP_KEYWORDS:
+            advice = "; use xargs or find -exec for iteration"
+        elif word in _CONDITIONAL_KEYWORDS:
+            advice = "; use && and || for conditionals"
+        else:
+            advice = ""
+        raise ParseError(f"{word}: control flow is not supported{advice}")
+    if word == "function":
+        raise ParseError(f"function: {_FUNCTION_ADVICE}")
+
 
 def _find_heredoc_ops(line: str) -> list[int]:
     """Positions of ``<<`` operators OUTSIDE quotes in a raw line.
@@ -244,6 +280,11 @@ def _parse_tokens(
     def flush_command():
         nonlocal cmd_name, cmd_args, cmd_redirects
         if cmd_name:
+            # ``name() { ... }`` -- the parenthesis pair follows the name
+            # with no argument between, as either one token ("()") or two
+            # ("(", ")").  A lone "(" elsewhere is left alone.
+            if cmd_args[:1] == ["()"] or cmd_args[:2] == ["(", ")"]:
+                raise ParseError(f"{cmd_name}(): {_FUNCTION_ADVICE}")
             current_pipeline_cmds.append(
                 Command(name=cmd_name, args=cmd_args, redirects=cmd_redirects)
             )
@@ -286,6 +327,7 @@ def _parse_tokens(
                 if next_token in ("|", ";", "\n", "&&", "||"):
                     raise ParseError(f"Expected command after '|', got '{next_token}'")
                 # It's a regular token — start the next command
+                _reject_control_flow(next_token)
                 next_token = unmask(next_token)
                 cmd_name = next_token
                 continue
@@ -370,6 +412,8 @@ def _parse_tokens(
 
             else:
                 # Regular word (Command Name or Argument)
+                if cmd_name is None:
+                    _reject_control_flow(token)
                 token = unmask(token)
                 if cmd_name is None:
                     cmd_name = token

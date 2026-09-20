@@ -63,6 +63,17 @@ expansion (`'$?'` stays literal). Command substitution `$(...)` is not
 supported and raises `ParseError` rather than mangling silently.
 Heredoc bodies are never expanded.
 
+Shell control flow is not supported either. A script whose command
+position holds `for`, `while`, `until`, `if`, `case`, one of their
+partners (`do`, `done`, `then`, `else`, `elif`, `fi`, `esac`), or a
+function definition (`function f { ... }`, `f() { ... }`) raises a
+single `ParseError` naming the word -- rather than reporting each word
+as a missing command, which is what a `for` loop used to do three
+times over. Use `xargs` or `find -exec` to iterate and `&&` / `||` for
+conditionals, and inject anything more involved as a custom command.
+Only command position counts: `echo for`, `grep -r done .`, a file
+named `for`, and quoted `'for'` are all ordinary words.
+
 Expansions are **never field-split** -- this is zsh's behavior, not
 bash's, and it's deliberate: a value with spaces stays one argument
 (`grep $PAT file` with `PAT="a b"` searches for `a b`), and a
