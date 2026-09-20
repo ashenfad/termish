@@ -34,3 +34,22 @@ def looks_like_binary(data: bytes) -> bool:
         if (b < 0x20 and b not in (0x09, 0x0A, 0x0D)) or b == 0x7F:
             suspect += 1
     return suspect / len(sample) > 0.01
+
+
+def split_lines(data: bytes) -> list[bytes]:
+    """Split content into lines at b"\\n", keeping the newline on each.
+
+    Splitting at the byte level leaves every other byte exactly as it
+    was: decoding first would rewrite each undecodable byte, and a text
+    split would also break lines at characters a shell never counts as
+    line endings (a lone \\x0b or \\x0c, U+2028). Trailing content with
+    no final newline is its own line; b"" has no lines at all.
+    """
+    if not data:
+        return []
+    lines = data.split(b"\n")
+    last = lines.pop()
+    result = [line + b"\n" for line in lines]
+    if last:
+        result.append(last)
+    return result

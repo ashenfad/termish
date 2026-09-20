@@ -3,10 +3,9 @@ Meta commands that invoke other commands.
 """
 
 import contextvars
-import io
 from typing import TYPE_CHECKING
 
-from termish.context import CommandContext, CommandResult
+from termish.context import CommandContext, CommandResult, PipeStream
 from termish.errors import TerminalError
 
 _MAX_XARGS_DEPTH = 16
@@ -108,8 +107,8 @@ def xargs(ctx: CommandContext) -> CommandResult | None:
         if verbose:
             stdout.write(f"{cmd_name} {' '.join(cmd_args)}\n")
 
-        cmd_stdin = io.StringIO()
-        cmd_stdout = io.StringIO()
+        cmd_stdin = PipeStream()
+        cmd_stdout = PipeStream()
         token = _xargs_depth.set(depth + 1)
         try:
             sub_ctx = CommandContext(
@@ -134,7 +133,10 @@ def xargs(ctx: CommandContext) -> CommandResult | None:
             raise TerminalError(f"{cmd_name}: execution error: {e}")
         finally:
             _xargs_depth.reset(token)
-        stdout.write(cmd_stdout.getvalue())
+        # The sub-command's output is moved, not read: pass its bytes
+        # through so a binary-producing command survives xargs.
+        stdout.flush()
+        stdout.buffer.write(cmd_stdout.getvalue())
 
     if replace:
         # -I mode: run command once per item, substituting placeholder

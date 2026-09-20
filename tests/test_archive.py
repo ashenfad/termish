@@ -117,12 +117,17 @@ class TestGzipStdout:
     def test_gzip_c_compress_to_stdout(self, fs):
         """gzip -c should write compressed data to stdout and keep original."""
         fs.write("/f.txt", b"data")
-        out = execute_script(to_script("gzip -c f.txt"), fs)
+        execute_script(to_script("gzip -c f.txt > out.gz"), fs)
         # Original file kept, no .gz file created
         assert fs.exists("/f.txt")
         assert not fs.exists("/f.txt.gz")
-        # stdout contains valid gzip data (encoded as latin-1)
-        assert gzip_module.decompress(out.encode("latin-1")) == b"data"
+        # The redirect captured the compressed bytes themselves
+        assert gzip_module.decompress(fs.read("/out.gz")) == b"data"
+
+    def test_gzip_c_compress_pipes_into_zcat(self, fs):
+        """gzip -c | zcat should round-trip through the pipe."""
+        fs.write("/f.txt", b"data")
+        assert execute_script(to_script("gzip -c f.txt | zcat"), fs) == "data"
 
 
 class TestZcat:
@@ -176,7 +181,7 @@ class TestZcat:
             execute_script(to_script("zcat missing.gz"), fs)
 
     def test_zcat_no_files(self, fs):
-        """zcat with no arguments should fail (no binary stdin support)."""
+        """zcat with no arguments and nothing piped in should fail."""
         with pytest.raises(TerminalError, match="no files specified"):
             execute_script(to_script("zcat"), fs)
 

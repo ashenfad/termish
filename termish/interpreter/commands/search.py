@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, TextIO
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-from termish.context import CommandContext, CommandResult
+from termish.context import CommandContext, CommandResult, PipeStream
 from termish.errors import TerminalError
 from termish.fs import FileSystem
 
@@ -868,12 +868,12 @@ def find(ctx: CommandContext) -> CommandResult | None:
         if cmd_func is None:
             raise TerminalError(f"{cmd_name}: command not found", exit_code=127)
 
-        cmd_stdout = io.StringIO()
+        cmd_stdout = PipeStream()
         try:
             result = cmd_func(
                 CommandContext(
                     args=cmd_args,
-                    stdin=io.StringIO(),
+                    stdin=PipeStream(),
                     stdout=cmd_stdout,
                     fs=executor_fs,
                     env=ctx.env,
@@ -892,7 +892,7 @@ def find(ctx: CommandContext) -> CommandResult | None:
         except Exception as e:
             raise TerminalError(f"{cmd_name}: execution error: {e}")
 
-        output = cmd_stdout.getvalue()
+        output = cmd_stdout.getvalue().decode("utf-8", errors="replace")
         if result is not None and result.stderr:
             diagnostic = (
                 result.stderr if result.stderr.endswith("\n") else result.stderr + "\n"

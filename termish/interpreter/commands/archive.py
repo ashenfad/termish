@@ -22,7 +22,7 @@ from ._argparse import CommandArgParser
 
 def gzip(ctx: CommandContext) -> CommandResult | None:
     """Compress files using gzip."""
-    args, _stdin, stdout, fs = ctx.args, ctx.stdin, ctx.stdout, ctx.fs
+    args, stdin, stdout, fs = ctx.args, ctx.stdin, ctx.stdout, ctx.fs
     # Pre-process: extract compression level flags (-1 through -9)
     compress_level = 9
     filtered_args: list[str] = []
@@ -44,7 +44,23 @@ def gzip(ctx: CommandContext) -> CommandResult | None:
         raise TerminalError(f"gzip: unknown arguments: {unknown}")
 
     if not parsed.files:
-        raise TerminalError("gzip: no files specified")
+        # No file operands: compress or decompress stdin to stdout, as
+        # gzip does when it is handed a pipe.  Empty stdin means nothing
+        # was piped in, which is a usage error rather than a request to
+        # compress nothing.
+        data = stdin.buffer.read()
+        if not data:
+            raise TerminalError("gzip: no files specified")
+        if parsed.decompress:
+            try:
+                result = gzip_module.decompress(data)
+            except Exception:
+                raise TerminalError("gzip: stdin: not in gzip format")
+        else:
+            result = gzip_module.compress(data, compresslevel=compress_level)
+        stdout.flush()
+        stdout.buffer.write(result)
+        return None
 
     for path in parsed.files:
         try:
@@ -60,7 +76,8 @@ def gzip(ctx: CommandContext) -> CommandResult | None:
                     raise TerminalError(f"gzip: {path}: {e}")
 
                 if parsed.stdout:
-                    stdout.write(result.decode("utf-8", errors="replace"))
+                    stdout.flush()
+                    stdout.buffer.write(result)
                 else:
                     out_path = path[:-3]  # Remove .gz suffix
                     if fs.exists(out_path) and not parsed.force:
@@ -82,7 +99,8 @@ def gzip(ctx: CommandContext) -> CommandResult | None:
 
                 if parsed.stdout:
                     # -c: write compressed data to stdout, keep original
-                    stdout.write(result.decode("latin-1"))
+                    stdout.flush()
+                    stdout.buffer.write(result)
                 else:
                     out_path = path + ".gz"
                     if fs.exists(out_path) and not parsed.force:
@@ -109,9 +127,10 @@ def zcat(ctx: CommandContext) -> CommandResult | None:
     """Decompress gzip files to stdout. Equivalent to gzip -dc.
 
     Unlike gzip -d, does not require a .gz suffix — any readable gzip
-    file works. Registered as both ``zcat`` and ``gzcat``.
+    file works, and with no file operands the compressed bytes are read
+    from stdin. Registered as both ``zcat`` and ``gzcat``.
     """
-    args, stdout, fs = ctx.args, ctx.stdout, ctx.fs
+    args, stdin, stdout, fs = ctx.args, ctx.stdin, ctx.stdout, ctx.fs
 
     parser = CommandArgParser(prog="zcat", add_help=False)
     parser.add_argument("-f", "--force", action="store_true", help="Ignored")
@@ -121,8 +140,23 @@ def zcat(ctx: CommandContext) -> CommandResult | None:
     if unknown:
         raise TerminalError(f"zcat: unknown arguments: {unknown}")
 
+    def emit(content: bytes, label: str) -> None:
+        try:
+            result = gzip_module.decompress(content)
+        except Exception:
+            raise TerminalError(f"zcat: {label}: not in gzip format")
+        stdout.flush()
+        stdout.buffer.write(result)
+
     if not parsed.files:
-        raise TerminalError("zcat: no files specified")
+        # No file operands: decompress stdin, as zcat does in a pipe.
+        # Empty stdin means nothing was piped in, which is a usage error
+        # rather than a request to decompress nothing.
+        piped = stdin.buffer.read()
+        if not piped:
+            raise TerminalError("zcat: no files specified")
+        emit(piped, "stdin")
+        return None
 
     for path in parsed.files:
         try:
@@ -132,12 +166,7 @@ def zcat(ctx: CommandContext) -> CommandResult | None:
         except IsADirectoryError:
             raise TerminalError(f"zcat: {path}: Is a directory")
 
-        try:
-            result = gzip_module.decompress(content)
-        except Exception:
-            raise TerminalError(f"zcat: {path}: not in gzip format")
-
-        stdout.write(result.decode("utf-8", errors="replace"))
+        emit(content, path)
 
 
 def tar(ctx: CommandContext) -> CommandResult | None:

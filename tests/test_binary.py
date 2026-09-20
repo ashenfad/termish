@@ -9,6 +9,7 @@ import gzip as gzip_module
 import pytest
 
 from termish import CommandContext, CommandResult, MemoryFS, execute
+from termish.errors import TerminalError
 
 ALL_BYTES = bytes(range(256))
 
@@ -67,6 +68,24 @@ class TestRedirectsCarryBytes:
         execute("cat crlf.txt | cat > copy.txt", fs)
         assert fs.read("/copy.txt") == b"a\r\nb\r\n"
 
+    def test_cp_copies_bytes(self, fs):
+        execute("cp bin.dat copy.dat", fs)
+        assert fs.read("/copy.dat") == ALL_BYTES
+
+    def test_mv_moves_bytes(self, fs):
+        execute("mv bin.dat moved.dat", fs)
+        assert fs.read("/moved.dat") == ALL_BYTES
+
+    def test_head_lines_keep_bytes_intact(self, fs):
+        fs.write("/lines.dat", b"\xff\xfe\n\x00\x01\n")
+        execute("head -n 1 lines.dat > h.dat", fs)
+        assert fs.read("/h.dat") == b"\xff\xfe\n"
+
+    def test_tail_lines_keep_bytes_intact(self, fs):
+        fs.write("/lines.dat", b"\xff\xfe\n\x00\x01\n")
+        execute("tail -n 1 lines.dat > t.dat", fs)
+        assert fs.read("/t.dat") == b"\x00\x01\n"
+
     def test_heredoc_body_is_utf8(self, fs):
         execute("cat <<EOF > out.txt\ncafé\nEOF", fs)
         assert fs.read("/out.txt") == "café\n".encode()
@@ -121,7 +140,7 @@ class TestTranscriptIsDecodedOnce:
     def test_undecodable_bytes_become_replacement_chars(self, fs):
         out = execute("cat bin.dat", fs)
         assert isinstance(out, str)
-        assert "�" in out
+        assert "\ufffd" in out
 
     def test_text_transcript_is_unchanged(self, fs):
         assert execute("echo café", fs) == "café\n"
@@ -160,3 +179,32 @@ class TestInjectedHandlers:
 
         execute("mixed > out.txt", fs, commands={"mixed": mixed})
         assert fs.read("/out.txt") == b"abc"
+
+
+class TestTranscriptSemantics:
+    """Bytes change nothing about where diagnostics land."""
+
+    def test_failing_handler_partial_output_is_decoded(self, fs):
+        def emit_then_fail(ctx: CommandContext) -> CommandResult | None:
+            ctx.stdout.buffer.write(b"\xff\xfe")
+            return CommandResult(exit_code=1, stderr="boom")
+
+        with pytest.raises(TerminalError) as exc_info:
+            execute("emit", fs, commands={"emit": emit_then_fail})
+        assert exc_info.value.partial_output == "\ufffd\ufffd"
+        assert exc_info.value.stderr == "boom"
+
+    def test_merged_stderr_follows_bytes_written_first(self, fs):
+        def noisy(ctx: CommandContext) -> CommandResult | None:
+            ctx.stdout.buffer.write(b"out\n")
+            return CommandResult(exit_code=0, stderr="warn\n")
+
+        out = execute("noisy 2>&1 | cat", fs, commands={"noisy": noisy})
+        assert out == "out\nwarn\n"
+
+    def test_stderr_redirect_writes_utf8_bytes(self, fs):
+        def noisy(ctx: CommandContext) -> CommandResult | None:
+            return CommandResult(exit_code=0, stderr="café\n")
+
+        execute("noisy 2> err.txt", fs, commands={"noisy": noisy})
+        assert fs.read("/err.txt") == "café\n".encode()
