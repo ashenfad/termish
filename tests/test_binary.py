@@ -180,6 +180,19 @@ class TestInjectedHandlers:
         execute("mixed > out.txt", fs, commands={"mixed": mixed})
         assert fs.read("/out.txt") == b"abc"
 
+    def test_text_lines_end_only_at_newline(self, fs):
+        # A handler iterating stdin as text sees the same lines a
+        # StringIO gave it: a bare \r does not end a line, and \r\n
+        # arrives untranslated.
+        fs.write("/mixed.txt", b"a\rb\r\nc\n")
+
+        def lines(ctx: CommandContext) -> CommandResult | None:
+            ctx.stdout.write(repr([line for line in ctx.stdin]))
+            return None
+
+        out = execute("cat mixed.txt | lines", fs, commands={"lines": lines})
+        assert out == repr(["a\rb\r\n", "c\n"])
+
 
 class TestTranscriptSemantics:
     """Bytes change nothing about where diagnostics land."""
