@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`termish.fs.check_filesystem`** -- a conformance kit for the `FileSystem` protocol, shipped in the package rather than in the test suite so that a backend author needs neither pytest nor a checkout of termish's tests: `from termish.fs import check_filesystem` and call it on an empty filesystem. It exercises all sixteen protocol methods, including the ranged read, append mode on `write`, and the `FileInfo.path` convention, raises `AssertionError` naming the method that misbehaved and what was expected, works relative to whatever `getcwd()` reports (so a filesystem rooted somewhere other than `/` is checked where it stands), and removes the scratch directory it created. The ranged read is the reason it exists: a backend that accepts `offset`/`size` and discards them passes every whole-file test there is.
+
+### Changed
+- **`FileSystem.read` takes a byte range** -- `read(path, offset: int = 0, size: int = -1) -> bytes`. Whole-file was the protocol's only shape, so a caller that wanted a parquet footer or the tail of a log pulled the entire file across whatever sits behind the backend: memory, an RPC bridge, an HTTP request. The semantics are file-object semantics. `offset` counts bytes from the start and must be >= 0 (a negative offset raises `ValueError`); `size` of -1 reads to the end and 0 reads nothing; a read starting at or past the end returns `b""`; a read that runs past the end is truncated to what is there rather than raising. With both defaults the result is the old whole-file read byte for byte, so every existing caller -- including every builtin, none of which was rewritten to use ranges -- is unaffected. `MemoryFS` implements the range by slicing.
+- **Implementers must accept the two new arguments.** Passing them to a filesystem written against the old `read(path)` raises `TypeError`, which is what makes this a 0.2.0-class change even though no *caller* has to change. Accepting them and ignoring them is worse than not implementing the range at all: the backend returns the whole file where the caller asked for a slice, and a caller that trusts the length or the starting position reads the wrong bytes. `check_filesystem` catches both.
+
 ### Fixed
 - **`find -exec` now dispatches argv directly** instead of rebuilding and reparsing a shell command. Paths containing shell metacharacters such as `;`, `|`, `>`, or `&` are passed to both the per-item (`\;`) and batch (`+`) forms as ordinary command arguments, so filenames cannot inject extra commands or redirects.
 

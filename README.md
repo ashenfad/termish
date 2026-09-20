@@ -99,7 +99,7 @@ Any object implementing these 16 methods works with termish -- no inheritance re
 class FileSystem(Protocol):
     def getcwd(self) -> str: ...
     def chdir(self, path: str) -> None: ...
-    def read(self, path: str) -> bytes: ...
+    def read(self, path: str, offset: int = 0, size: int = -1) -> bytes: ...
     def write(self, path: str, content: bytes, mode: str = "w") -> None: ...
     def exists(self, path: str) -> bool: ...
     def isfile(self, path: str) -> bool: ...
@@ -115,6 +115,18 @@ class FileSystem(Protocol):
     def glob(self, pattern: str) -> list[str]: ...
 ```
 
+`read` takes an optional byte range. `read(path)` returns the whole file, exactly as before; `read(path, offset, size)` returns at most `size` bytes starting at `offset`, with `size=-1` meaning "to the end". A read at or past the end of the file returns `b""`, and one that runs past the end is truncated rather than raising. A backend that can fetch a range -- a real file, an HTTP endpoint that answers 206, a block store -- can then serve a caller that wants a parquet footer without moving the parquet.
+
+### Conformance
+
+```python
+from termish.fs import check_filesystem
+
+check_filesystem(MyFS())   # raises AssertionError, or returns None
+```
+
+`check_filesystem` takes an empty filesystem and exercises all sixteen methods, including the ranged read, append mode on `write`, and the `FileInfo.path` convention; it works relative to whatever `getcwd()` reports and removes what it created. There is no test framework involved, so a backend author outside termish can run it from a script. A backend that accepts `offset` and `size` and discards them is what it is mainly there to catch: whole-file reads still return the right bytes, so nothing else notices.
+
 ## Part of the agex stack
 
 termish provides shell commands for AI agents in [agex](https://github.com/ashenfad/agex), operating over virtual filesystems from [monkeyfs](https://github.com/ashenfad/monkeyfs).
@@ -122,6 +134,8 @@ termish provides shell commands for AI agents in [agex](https://github.com/ashen
 ## Compatible filesystems
 
 [monkeyfs](https://github.com/ashenfad/monkeyfs) `VirtualFS` and `IsolatedFS` both satisfy the termish `FileSystem` protocol and can be passed directly to `execute()`.
+
+That is not a coincidence, and it is a promise: termish's `FileSystem` protocol and monkeyfs's backend protocol are the same sixteen methods with the same signatures, ranged `read` included. `open()` is what monkeyfs provides *over* a backend -- termish never asks for it. The agreement is a convention enforced by tests on both sides rather than a shared import: a common package would cost both libraries their zero-dependency line for twenty lines of protocol.
 
 ## Builtin commands
 
