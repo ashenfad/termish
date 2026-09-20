@@ -2,9 +2,13 @@
 
 `check_filesystem(fs)` drives every method the protocol declares against a
 filesystem you hand it and raises AssertionError on the first one that
-misbehaves, naming the method and what was expected. A backend author
-outside termish runs it as a plain function call -- no test framework, no
-fixtures, nothing to import but termish itself:
+answers wrongly, naming the method and what was expected. A method that
+raises on a valid call is not caught: its exception comes through with the
+backend's own traceback, which points at the failing line where a wrapped
+assertion would only name the method. Either way the scratch directory is
+removed. A backend author outside termish runs it as a plain function
+call -- no test framework, no fixtures, nothing to import but termish
+itself:
 
     from termish.fs import check_filesystem
     from mypackage import MyFS

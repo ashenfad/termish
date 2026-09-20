@@ -125,7 +125,7 @@ from termish.fs import check_filesystem
 check_filesystem(MyFS())   # raises AssertionError, or returns None
 ```
 
-`check_filesystem` takes an empty filesystem and exercises all sixteen methods, including the ranged read, append mode on `write`, and the `FileInfo.path` convention; it works relative to whatever `getcwd()` reports and removes what it created. There is no test framework involved, so a backend author outside termish can run it from a script. A backend that accepts `offset` and `size` and discards them is what it is mainly there to catch: whole-file reads still return the right bytes, so nothing else notices.
+`check_filesystem` takes an empty filesystem and exercises all sixteen methods, including the ranged read, append mode on `write`, and the `FileInfo.path` convention; it works relative to whatever `getcwd()` reports and removes what it created. A wrong answer is an `AssertionError` naming the method; a method that raises on a valid call raises through with the backend's own traceback, since that points at the failing line and an assertion would not. There is no test framework involved, so a backend author outside termish can run it from a script. A backend that accepts `offset` and `size` and discards them is what it is mainly there to catch: whole-file reads still return the right bytes, so nothing else notices.
 
 ## Part of the agex stack
 
