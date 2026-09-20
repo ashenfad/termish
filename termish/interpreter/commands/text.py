@@ -26,21 +26,31 @@ def wc(ctx: CommandContext) -> CommandResult | None:
     # If no flags specified, show all three (lines, words, bytes)
     show_lines = parsed.lines
     show_words = parsed.words
-    show_bytes = parsed.bytes or parsed.chars  # -m same as -c for UTF-8
+    show_bytes = parsed.bytes
+    show_chars = parsed.chars
     show_max_line = parsed.max_line_length
-    if not (show_lines or show_words or show_bytes or show_max_line):
+    if not (show_lines or show_words or show_bytes or show_chars or show_max_line):
         show_lines = show_words = show_bytes = True
 
-    totals = {"lines": 0, "words": 0, "bytes": 0, "max_line": 0}
+    totals = {"lines": 0, "words": 0, "chars": 0, "bytes": 0, "max_line": 0}
     results: list[tuple[dict[str, int], str]] = []
 
-    def count_content(content: str, name: str):
+    def count_content(data: bytes, name: str):
+        """Count bytes from the bytes; everything else from the text.
+
+        ``-c`` is a byte count and never decodes, so a two-byte ``é``
+        counts as two. Lines, words, characters and the longest line are
+        properties of the text, which is decoded once with undecodable
+        bytes replaced.
+        """
+        content = data.decode("utf-8", errors="replace")
         lines = content.splitlines()
         max_line = max((len(line) for line in lines), default=0)
         counts = {
-            "lines": content.count("\n"),
+            "lines": data.count(b"\n"),
             "words": len(content.split()),
-            "bytes": len(content.encode("utf-8")),
+            "chars": len(content),
+            "bytes": len(data),
             "max_line": max_line,
         }
         results.append((counts, name))
@@ -52,14 +62,11 @@ def wc(ctx: CommandContext) -> CommandResult | None:
 
     if not parsed.files:
         # Read from stdin
-        content = stdin.read()
-        count_content(content, "")
+        count_content(stdin.buffer.read(), "")
     else:
         for path in parsed.files:
             try:
-                content_bytes = fs.read(path)
-                content = content_bytes.decode("utf-8", errors="replace")
-                count_content(content, path)
+                count_content(fs.read(path), path)
             except FileNotFoundError:
                 raise TerminalError(f"wc: {path}: No such file or directory")
             except IsADirectoryError:
@@ -75,6 +82,8 @@ def wc(ctx: CommandContext) -> CommandResult | None:
             parts.append(f"{counts['lines']:>{width}}")
         if show_words:
             parts.append(f"{counts['words']:>{width}}")
+        if show_chars:
+            parts.append(f"{counts['chars']:>{width}}")
         if show_bytes:
             parts.append(f"{counts['bytes']:>{width}}")
         if show_max_line:

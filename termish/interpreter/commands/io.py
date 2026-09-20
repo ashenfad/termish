@@ -8,6 +8,7 @@ from termish.context import CommandContext, CommandResult
 from termish.errors import TerminalError
 
 from ._argparse import CommandArgParser
+from ._util import split_lines
 
 
 def echo(ctx: CommandContext) -> CommandResult | None:
@@ -299,33 +300,28 @@ def cat(ctx: CommandContext) -> CommandResult | None:
 
         return "".join(result)
 
+    display = show_ends or show_tabs or show_numbers
+
+    def emit(data: bytes) -> None:
+        """Copy content out: bytes unchanged, unless a display flag asks
+        for a rendering, which is a text view by definition."""
+        if display:
+            stdout.write(format_content(data.decode("utf-8", errors="replace")))
+        else:
+            stdout.flush()
+            stdout.buffer.write(data)
+
     if not parsed.files:
-        content = stdin.read()
-        stdout.write(
-            format_content(content)
-            if (show_ends or show_tabs or show_numbers)
-            else content
-        )
+        emit(stdin.buffer.read())
         return
 
     for path in parsed.files:
         if path == "-":
-            content = stdin.read()
-            stdout.write(
-                format_content(content)
-                if (show_ends or show_tabs or show_numbers)
-                else content
-            )
+            emit(stdin.buffer.read())
             continue
 
         try:
-            content_bytes = fs.read(path)
-            content = content_bytes.decode("utf-8", errors="replace")
-            stdout.write(
-                format_content(content)
-                if (show_ends or show_tabs or show_numbers)
-                else content
-            )
+            emit(fs.read(path))
         except FileNotFoundError:
             raise TerminalError(f"cat: {path}: No such file or directory")
         except IsADirectoryError:
@@ -358,17 +354,17 @@ def head(ctx: CommandContext) -> CommandResult | None:
     byte_mode = parsed.bytes > 0
     limit = parsed.bytes if byte_mode else parsed.lines
 
-    if not parsed.files:
-        content = stdin.read()
+    def emit(data: bytes) -> None:
+        """Write the leading bytes or lines, whichever was asked for."""
+        stdout.flush()
         if byte_mode:
-            stdout.write(content[:limit])
+            stdout.buffer.write(data[:limit])
         else:
-            count = 0
-            for line in content.splitlines(keepends=True):
-                if count >= limit:
-                    break
-                stdout.write(line)
-                count += 1
+            for line in split_lines(data)[:limit]:
+                stdout.buffer.write(line)
+
+    if not parsed.files:
+        emit(stdin.buffer.read())
         return
 
     for i, path in enumerate(parsed.files):
@@ -376,15 +372,7 @@ def head(ctx: CommandContext) -> CommandResult | None:
             stdout.write(f"==> {path} <==\n")
 
         try:
-            content_bytes = fs.read(path)
-            if byte_mode:
-                stdout.write(content_bytes[:limit].decode("utf-8", errors="replace"))
-            else:
-                content = content_bytes.decode("utf-8", errors="replace")
-                lines = content.splitlines(keepends=True)
-                for line in lines[:limit]:
-                    stdout.write(line)
-
+            emit(fs.read(path))
         except Exception as e:
             raise TerminalError(f"head: cannot open '{path}': {e}")
 
@@ -418,19 +406,19 @@ def tail(ctx: CommandContext) -> CommandResult | None:
     if byte_mode:
         byte_limit = parsed.bytes
 
+        def emit_bytes(data: bytes) -> None:
+            stdout.flush()
+            stdout.buffer.write(data[-byte_limit:])
+
         if not parsed.files:
-            content = stdin.read()
-            stdout.write(content[-byte_limit:])
+            emit_bytes(stdin.buffer.read())
             return
 
         for i, path in enumerate(parsed.files):
             if len(parsed.files) > 1:
                 stdout.write(f"==> {path} <==\n")
             try:
-                content_bytes = fs.read(path)
-                stdout.write(
-                    content_bytes[-byte_limit:].decode("utf-8", errors="replace")
-                )
+                emit_bytes(fs.read(path))
             except Exception as e:
                 raise TerminalError(f"tail: cannot open '{path}': {e}")
             if i < len(parsed.files) - 1:
@@ -450,15 +438,15 @@ def tail(ctx: CommandContext) -> CommandResult | None:
     else:
         limit = int(limit_str)
 
-    def select_lines(all_lines: list[str]) -> list[str]:
-        if from_start:
-            return all_lines[limit - 1 :]
-        return all_lines[-limit:]
+    def emit_lines(data: bytes) -> None:
+        all_lines = split_lines(data)
+        selected = all_lines[limit - 1 :] if from_start else all_lines[-limit:]
+        stdout.flush()
+        for line in selected:
+            stdout.buffer.write(line)
 
     if not parsed.files:
-        lines = stdin.readlines()
-        for line in select_lines(lines):
-            stdout.write(line)
+        emit_lines(stdin.buffer.read())
         return
 
     for i, path in enumerate(parsed.files):
@@ -466,12 +454,7 @@ def tail(ctx: CommandContext) -> CommandResult | None:
             stdout.write(f"==> {path} <==\n")
 
         try:
-            content_bytes = fs.read(path)
-            content = content_bytes.decode("utf-8", errors="replace")
-            lines = content.splitlines(keepends=True)
-            for line in select_lines(lines):
-                stdout.write(line)
-
+            emit_lines(fs.read(path))
         except Exception as e:
             raise TerminalError(f"tail: cannot open '{path}': {e}")
 
@@ -490,15 +473,16 @@ def tee(ctx: CommandContext) -> CommandResult | None:
     if unknown:
         raise TerminalError(f"tee: unknown option: {unknown[0]}")
 
-    content = stdin.read()
+    content = stdin.buffer.read()
 
     # Write to stdout
-    stdout.write(content)
+    stdout.flush()
+    stdout.buffer.write(content)
 
     # Write to each file
     mode = "a" if parsed.append else "w"
     for path in parsed.files:
         try:
-            fs.write(path, content.encode("utf-8"), mode=mode)
+            fs.write(path, content, mode=mode)
         except Exception as e:
             raise TerminalError(f"tee: {path}: {e}")

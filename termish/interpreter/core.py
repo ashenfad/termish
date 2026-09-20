@@ -7,10 +7,9 @@ import contextvars
 import io
 import re
 from collections.abc import Mapping
-from typing import TextIO
 
 from termish.ast import Pipeline, Script
-from termish.context import CommandContext
+from termish.context import CommandContext, PipeStream
 from termish.errors import CommandFunc, TerminalError
 from termish.fs import FileSystem
 from termish.quote_masker import mask_quotes, unmask_and_unquote
@@ -149,7 +148,10 @@ def _diagnostic(e: TerminalError) -> str:
 
 def _execute_script_inner(script: Script, fs: FileSystem, env: dict[str, str]) -> str:
     """Inner execution loop (injected commands already set via context var)."""
-    final_output = io.StringIO()
+    # The transcript accumulates bytes — whatever the commands actually
+    # emitted — and is decoded once, at the end.  Diagnostics are text
+    # and are encoded as they are appended.
+    final_output = io.BytesIO()
     last_succeeded = True
     last_error: TerminalError | None = None
     last_exit_code = 0  # what "$?" expands to
@@ -171,7 +173,7 @@ def _execute_script_inner(script: Script, fs: FileSystem, env: dict[str, str]) -
             # ";" always executes
 
         if pending_diag:
-            final_output.write(pending_diag)
+            final_output.write(pending_diag.encode("utf-8"))
         pending_diag = ""
 
         try:
@@ -193,15 +195,26 @@ def _execute_script_inner(script: Script, fs: FileSystem, env: dict[str, str]) -
     if last_error is not None:
         raise TerminalError(
             last_error.message,
-            partial_output=final_output.getvalue(),
+            partial_output=_transcript(final_output),
             exit_code=last_error.exit_code,
             stderr=last_error.stderr,
         )
 
-    return final_output.getvalue()
+    return _transcript(final_output)
 
 
-def _flush_partial(cmd_stdout: io.StringIO, stdout: TextIO) -> None:
+def _transcript(output: io.BytesIO) -> str:
+    """Decode accumulated output for display.
+
+    The transcript is what a terminal screen would have shown, so bytes
+    that are not valid UTF-8 become U+FFFD here rather than raising.
+    This is the only place the pipeline's payload is decoded on its way
+    out; a byte that reached a file or a pipe reached it unchanged.
+    """
+    return output.getvalue().decode("utf-8", errors="replace")
+
+
+def _flush_partial(cmd_stdout: PipeStream, stdout: io.BytesIO) -> None:
     """Move a failing command's own stdout to the transcript.
 
     A command writes into its private ``cmd_stdout``, which is normally
@@ -211,15 +224,15 @@ def _flush_partial(cmd_stdout: io.StringIO, stdout: TextIO) -> None:
     that matters: an HTTP client writing an error BODY and then exiting
     nonzero on the status. Losing the body loses the explanation.
     """
-    text = cmd_stdout.getvalue()
-    if text:
-        stdout.write(text)
+    data = cmd_stdout.getvalue()
+    if data:
+        stdout.write(data)
 
 
 def _execute_pipeline(
     pipeline: Pipeline,
     fs: FileSystem,
-    stdout: TextIO,
+    stdout: io.BytesIO,
     env: dict[str, str],
     last_exit_code: int,
 ):
@@ -230,12 +243,12 @@ def _execute_pipeline(
     if not pipeline.commands:
         return
 
-    current_input: str | None = None
+    current_input: bytes | None = None
     merged_failure: TerminalError | None = None
 
     for cmd_node in pipeline.commands:
-        cmd_stdin = io.StringIO(current_input) if current_input else io.StringIO()
-        cmd_stdout = io.StringIO()
+        cmd_stdin = PipeStream(current_input or b"")
+        cmd_stdout = PipeStream()
 
         # Expand the command name and args as one word list so an
         # empty-expanding name shifts away (zsh-style: `$UNSET echo hi`
@@ -247,7 +260,7 @@ def _execute_pipeline(
             # The whole command expanded to nothing (`$UNSET` alone):
             # a silent no-op, like zsh.  Redirects are not processed.
             merged_failure = None
-            current_input = ""
+            current_input = b""
             continue
         cmd_name, expanded_args = words[0], words[1:]
 
@@ -260,14 +273,12 @@ def _execute_pipeline(
             if input_redirect.type == "<<":
                 # Heredoc bodies are always literal (as if the delimiter
                 # were quoted) — no expansion.
-                cmd_stdin = io.StringIO(input_redirect.content or "")
+                cmd_stdin = PipeStream((input_redirect.content or "").encode("utf-8"))
             else:
                 target = _expand_word(input_redirect.target, env, last_exit_code)
                 path = resolve_path(target, fs)
                 try:
-                    content_bytes = fs.read(path)
-                    content_str = content_bytes.decode("utf-8", errors="replace")
-                    cmd_stdin = io.StringIO(content_str)
+                    cmd_stdin = PipeStream(fs.read(path))
                 except Exception as e:
                     raise TerminalError(f"{cmd_name}: {target}: {e}")
 
@@ -332,10 +343,13 @@ def _execute_pipeline(
                 # Success with diagnostics (e.g. warnings): a terminal
                 # shows stderr on screen but never feeds it to the next
                 # pipe stage — write it straight to the transcript.
-                stdout.write(err_text)
+                stdout.write(err_text.encode("utf-8"))
         elif stderr_redirect.type == "2>&1":
             # Merge into stdout: joins the pipe / transcript below.
-            cmd_stdout.write(err_text)
+            # Stderr is text; it enters the byte stream encoded UTF-8,
+            # after whatever the handler wrote.
+            cmd_stdout.flush()
+            cmd_stdout.buffer.write(err_text.encode("utf-8"))
         else:
             # 2>file truncates (even when no stderr was produced, as in
             # bash); 2>>file appends; /dev/null discards.
@@ -343,7 +357,12 @@ def _execute_pipeline(
             if target != "/dev/null":
                 path = resolve_path(target, fs)
                 try:
-                    _write_to_file(path, err_text, stderr_redirect.type == "2>>", fs)
+                    _write_to_file(
+                        path,
+                        err_text.encode("utf-8"),
+                        stderr_redirect.type == "2>>",
+                        fs,
+                    )
                 except Exception as e:
                     raise TerminalError(f"{cmd_name}: redirect failed: {e}")
 
@@ -358,7 +377,7 @@ def _execute_pipeline(
         merged_failure = failure  # only ever non-None for "2>&1"
 
         # Capture output
-        output_content = cmd_stdout.getvalue()
+        output_bytes = cmd_stdout.getvalue()
 
         # Handle Output Redirects
         output_redirects = [r for r in cmd_node.redirects if r.type in (">", ">>")]
@@ -368,12 +387,12 @@ def _execute_pipeline(
                 target = _expand_word(r.target, env, last_exit_code)
                 path = resolve_path(target, fs)
                 try:
-                    _write_to_file(path, output_content, r.type == ">>", fs)
+                    _write_to_file(path, output_bytes, r.type == ">>", fs)
                 except Exception as e:
                     raise TerminalError(f"{cmd_name}: redirect failed: {e}")
-            current_input = ""
+            current_input = b""
         else:
-            current_input = output_content
+            current_input = output_bytes
 
     if current_input:
         stdout.write(current_input)
@@ -492,8 +511,7 @@ def _expand_args(
     return expanded
 
 
-def _write_to_file(path: str, content: str, append: bool, fs: FileSystem):
-    """Helper to write/append text to file."""
-    content_bytes = content.encode("utf-8")
+def _write_to_file(path: str, content: bytes, append: bool, fs: FileSystem):
+    """Helper to write/append bytes to file."""
     mode = "a" if append else "w"
-    fs.write(path, content_bytes, mode=mode)
+    fs.write(path, content, mode=mode)
