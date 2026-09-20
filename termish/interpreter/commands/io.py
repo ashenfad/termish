@@ -88,6 +88,9 @@ _PRINTF_SPEC_CHARS = "-+ #0123456789.'"
 _PRINTF_DECIMAL = re.compile(r"[+-]?[0-9]+\Z")
 _PRINTF_HEX = re.compile(r"[+-]?0[xX][0-9a-fA-F]+\Z")
 _PRINTF_OCTAL = re.compile(r"[+-]?0[0-7]+\Z")
+# A leading zero claims the operand for octal, so ``08`` is not decimal
+# eight but an octal number with a digit octal does not have.
+_PRINTF_OCTAL_SHAPED = re.compile(r"[+-]?0[0-9]+\Z")
 
 
 def _printf_unescape(fmt: str) -> tuple[str, int]:
@@ -174,13 +177,17 @@ def _printf_int(text: str) -> int:
 
     Decimal, ``0x``-prefixed hex and leading-zero octal are accepted, each
     with an optional sign.  Anything else raises ValueError, which the
-    caller reports as an invalid number.
+    caller reports as an invalid number.  A leading zero commits the
+    operand to octal: ``08`` is invalid, not eight, because a shell that
+    read it as eight would print a number where bash prints an error.
     """
     stripped = text.strip()
     if _PRINTF_HEX.match(stripped):
         return int(stripped, 16)
     if _PRINTF_OCTAL.match(stripped):
         return int(stripped, 8)
+    if _PRINTF_OCTAL_SHAPED.match(stripped):
+        raise ValueError(text)
     if _PRINTF_DECIMAL.match(stripped):
         return int(stripped, 10)
     raise ValueError(text)
@@ -189,6 +196,11 @@ def _printf_int(text: str) -> int:
 def printf(ctx: CommandContext) -> CommandResult | None:
     """Write formatted output — no trailing newline is ever added."""
     args, stdout = ctx.args, ctx.stdout
+    # ``--`` ends the options, of which there are none, so it is dropped
+    # rather than taken as the format: a script hardened against a format
+    # that starts with ``-`` must not print a literal ``--``.
+    if args and args[0] == "--":
+        args = args[1:]
     if not args:
         raise TerminalError("printf: usage: printf FORMAT [ARGUMENT]...")
 
