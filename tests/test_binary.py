@@ -86,6 +86,33 @@ class TestRedirectsCarryBytes:
         execute("tail -n 1 lines.dat > t.dat", fs)
         assert fs.read("/t.dat") == b"\x00\x01\n"
 
+    def test_find_exec_batch_keeps_bytes(self, fs):
+        fs.makedirs("/d")
+        fs.write("/d/one.dat", ALL_BYTES)
+        execute("find d -type f -exec cat '{}' '+' > copy.dat", fs)
+        assert fs.read("/copy.dat") == ALL_BYTES
+
+    def test_find_exec_per_item_keeps_bytes(self, fs):
+        fs.makedirs("/d")
+        fs.write("/d/one.dat", ALL_BYTES)
+        execute("find d -type f -exec cat '{}' ';' | cat > copy.dat", fs)
+        assert fs.read("/copy.dat") == ALL_BYTES
+
+    def test_find_exec_stderr_stays_ahead_of_bytes(self, fs):
+        fs.makedirs("/d")
+        fs.write("/d/one.dat", ALL_BYTES)
+
+        def warn_and_emit(ctx: CommandContext) -> CommandResult | None:
+            ctx.stdout.buffer.write(ALL_BYTES)
+            return CommandResult(exit_code=0, stderr="careful")
+
+        execute(
+            "find d -type f -exec warn_and_emit '{}' ';' > out.dat",
+            fs,
+            commands={"warn_and_emit": warn_and_emit},
+        )
+        assert fs.read("/out.dat") == b"careful\n" + ALL_BYTES
+
     def test_heredoc_body_is_utf8(self, fs):
         execute("cat <<EOF > out.txt\ncafé\nEOF", fs)
         assert fs.read("/out.txt") == "café\n".encode()

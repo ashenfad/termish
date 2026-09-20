@@ -526,6 +526,20 @@ class _SizePred(_FindPred):
         return item.size == self.threshold
 
 
+def _emit_bytes(stdout: TextIO, data: bytes) -> None:
+    """Write a sub-command's output to find's stdout byte for byte.
+
+    The output is whatever the sub-command produced -- ``-exec cat {} +``
+    over a binary file is a copy of that file -- so it must reach the
+    pipe or redirect unchanged. Decoding it into find's text stream would
+    replace every invalid UTF-8 sequence and hand a redirect a corrupted
+    copy. The text side is flushed first so anything find itself wrote
+    stays ahead of it.
+    """
+    stdout.flush()
+    stdout.buffer.write(data)
+
+
 class _ExecPred(_FindPred):
     """Run a command for each match (action predicate).
 
@@ -541,7 +555,7 @@ class _ExecPred(_FindPred):
         self,
         cmd_tokens: list[str],
         stdout: TextIO,
-        executor: Callable[[list[str], FileSystem], str],
+        executor: Callable[[list[str], FileSystem], bytes],
     ) -> None:
         self.cmd_tokens = cmd_tokens
         self.stdout = stdout
@@ -555,7 +569,7 @@ class _ExecPred(_FindPred):
         try:
             output = self.executor(expanded, fs)
             if output:
-                self.stdout.write(output)
+                _emit_bytes(self.stdout, output)
         except Exception:
             return False
         return True
@@ -574,7 +588,7 @@ class _ExecBatchPred(_FindPred):
         self,
         cmd_tokens: list[str],
         stdout: TextIO,
-        executor: Callable[[list[str], FileSystem], str],
+        executor: Callable[[list[str], FileSystem], bytes],
     ) -> None:
         self.cmd_tokens = cmd_tokens
         self.stdout = stdout
@@ -599,7 +613,7 @@ class _ExecBatchPred(_FindPred):
         try:
             output = self.executor(expanded, fs)
             if output:
-                self.stdout.write(output)
+                _emit_bytes(self.stdout, output)
         except Exception:
             pass
 
@@ -657,7 +671,7 @@ def _has_action(pred: _FindPred) -> bool:
 def _parse_find_predicates(
     tokens: list[str],
     stdout: TextIO | None = None,
-    executor: Callable[[list[str], FileSystem], str] | None = None,
+    executor: Callable[[list[str], FileSystem], bytes] | None = None,
 ) -> _FindPred:
     """Parse find predicate tokens into an expression tree.
 
@@ -859,8 +873,13 @@ def find(ctx: CommandContext) -> CommandResult | None:
             i += 1
 
     # Build executor for -exec predicates (deferred import to avoid circular dep)
-    def _executor(argv: list[str], executor_fs: FileSystem) -> str:
-        """Dispatch an already-tokenized command without shell reparsing."""
+    def _executor(argv: list[str], executor_fs: FileSystem) -> bytes:
+        """Dispatch an already-tokenized command without shell reparsing.
+
+        Returns the sub-command's stdout as bytes, with its stderr (text)
+        encoded ahead of it, so a binary payload survives the trip through
+        find unchanged.
+        """
         from termish.interpreter.core import _resolve_command
 
         cmd_name, *cmd_args = argv
@@ -892,12 +911,12 @@ def find(ctx: CommandContext) -> CommandResult | None:
         except Exception as e:
             raise TerminalError(f"{cmd_name}: execution error: {e}")
 
-        output = cmd_stdout.getvalue().decode("utf-8", errors="replace")
+        output = cmd_stdout.getvalue()
         if result is not None and result.stderr:
             diagnostic = (
                 result.stderr if result.stderr.endswith("\n") else result.stderr + "\n"
             )
-            return diagnostic + output
+            return diagnostic.encode("utf-8") + output
         return output
 
     predicate = _parse_find_predicates(
