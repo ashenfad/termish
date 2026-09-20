@@ -81,6 +81,58 @@ class TestBasicFileOps:
         assert fs.read("/new.txt") == b"data"
 
 
+class TestRangedRead:
+    def _fs(self):
+        fs = MemoryFS()
+        fs.write("/data.bin", b"0123456789abcdef")
+        return fs
+
+    def test_defaults_read_whole_file(self):
+        fs = self._fs()
+        assert fs.read("/data.bin") == b"0123456789abcdef"
+        assert fs.read("/data.bin", 0, -1) == b"0123456789abcdef"
+
+    def test_offset_reads_to_end(self):
+        fs = self._fs()
+        assert fs.read("/data.bin", 10) == b"abcdef"
+
+    def test_size_caps_the_read(self):
+        fs = self._fs()
+        assert fs.read("/data.bin", 0, 4) == b"0123"
+        assert fs.read("/data.bin", 4, 4) == b"4567"
+
+    def test_size_zero_reads_nothing(self):
+        fs = self._fs()
+        assert fs.read("/data.bin", 4, 0) == b""
+
+    def test_read_at_or_past_eof_is_empty(self):
+        fs = self._fs()
+        assert fs.read("/data.bin", 16) == b""
+        assert fs.read("/data.bin", 99) == b""
+        assert fs.read("/data.bin", 99, 4) == b""
+
+    def test_read_past_eof_is_truncated(self):
+        fs = self._fs()
+        assert fs.read("/data.bin", 12, 999) == b"cdef"
+
+    def test_negative_offset_raises(self):
+        fs = self._fs()
+        with pytest.raises(ValueError):
+            fs.read("/data.bin", -1)
+
+    def test_range_on_relative_path(self):
+        fs = self._fs()
+        fs.makedirs("/sub")
+        fs.chdir("/sub")
+        fs.write("rel.bin", b"hello world")
+        assert fs.read("rel.bin", 6, 5) == b"world"
+
+    def test_range_on_missing_file_still_raises(self):
+        fs = self._fs()
+        with pytest.raises(FileNotFoundError):
+            fs.read("/nope.bin", 2, 2)
+
+
 class TestDirectoryOps:
     def test_mkdir(self):
         fs = MemoryFS()

@@ -64,8 +64,34 @@ class FileSystem(Protocol):
         """Change the current working directory."""
         ...
 
-    def read(self, path: str) -> bytes:
-        """Read entire file contents as bytes."""
+    def read(self, path: str, offset: int = 0, size: int = -1) -> bytes:
+        """Read a file's bytes, or a byte range of them.
+
+        The range is described in file-object terms, so a backend that
+        can fetch a range -- a real file, an HTTP endpoint that answers
+        206, a block store -- can serve a caller that wants twenty bytes
+        of a gigabyte without moving the gigabyte.
+
+        Args:
+            path: File path.
+            offset: Byte position from the start of the file. Must be
+                >= 0; a negative offset raises ValueError.
+            size: How many bytes to read. -1 (the default) reads to the
+                end of the file; 0 returns b"".
+
+        Returns:
+            The requested bytes. With both defaults this is the entire
+            file, byte for byte, so callers that ask for no range are
+            unaffected by the range existing. A read starting at or past
+            the end of the file returns b"". A read that runs past the
+            end is truncated to what is there, never an error.
+
+        An implementation that accepts the two arguments and ignores
+        them is wrong, not merely slow: it returns the whole file where
+        the caller asked for a slice, and a caller that trusts the
+        length or the starting position then reads the wrong bytes.
+        `termish.fs.check_filesystem` checks for exactly that.
+        """
         ...
 
     def write(self, path: str, content: bytes, mode: str = "w") -> None:

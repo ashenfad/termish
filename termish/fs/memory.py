@@ -67,13 +67,26 @@ class MemoryFS:
 
     # -- read / write --
 
-    def read(self, path: str) -> bytes:
+    def read(self, path: str, offset: int = 0, size: int = -1) -> bytes:
+        """Read the file at *path*, or the byte range starting at *offset*.
+
+        A negative offset raises ValueError. A size of -1 reads to the end
+        of the file. A read at or past the end returns b"", and a read that
+        runs past the end returns what is there rather than raising.
+        """
+        if offset < 0:
+            raise ValueError(f"negative read offset: {offset}")
         path = self._resolve(path)
         if path not in self._files:
             if path in self._dirs:
                 raise IsADirectoryError(_errno.EISDIR, "Is a directory", path)
             raise FileNotFoundError(_errno.ENOENT, "No such file", path)
-        return self._files[path]
+        content = self._files[path]
+        if offset == 0 and size < 0:
+            return content
+        if size < 0:
+            return content[offset:]
+        return content[offset : offset + size]
 
     def write(self, path: str, content: bytes, mode: str = "w") -> None:
         path = self._resolve(path)
