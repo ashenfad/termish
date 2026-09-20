@@ -1,5 +1,8 @@
+import re
+
 import pytest
 
+from termish import MemoryFS, TerminalError, execute
 from termish.parser import ParseError, to_script
 
 
@@ -422,3 +425,124 @@ def test_line_continuation():
     cmd = script.pipelines[0].commands[0]
     assert cmd.args == [r"'hello\nworld'"]
     assert "\n" not in cmd.args[0]  # No actual newline
+
+
+@pytest.mark.parametrize(
+    "keyword,advice",
+    [
+        ("for", "xargs or find -exec"),
+        ("while", "xargs or find -exec"),
+        ("until", "xargs or find -exec"),
+        ("do", "xargs or find -exec"),
+        ("done", "xargs or find -exec"),
+        ("if", r"&& and \|\|"),
+        ("then", r"&& and \|\|"),
+        ("elif", r"&& and \|\|"),
+        ("else", r"&& and \|\|"),
+        ("fi", r"&& and \|\|"),
+        ("case", ""),
+        ("esac", ""),
+    ],
+)
+def test_control_flow_keyword_in_command_position(keyword, advice):
+    with pytest.raises(ParseError) as exc:
+        to_script(f"{keyword} whatever")
+    assert str(exc.value).startswith(f"{keyword}: control flow is not supported")
+    if advice:
+        assert re.search(advice, str(exc.value))
+
+
+def test_control_flow_reports_only_the_first_keyword():
+    """A loop yields one diagnostic, not one per keyword."""
+    with pytest.raises(ParseError) as exc:
+        to_script("for f in a b; do echo $f; done")
+    message = str(exc.value)
+    assert message == (
+        "for: control flow is not supported; use xargs or find -exec for iteration"
+    )
+    assert "do:" not in message and "done:" not in message
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        "echo x | for f in a; do echo $f; done",
+        "echo x; done",
+        "echo x && then",
+        "echo x || elif",
+        "> out.txt while",
+        "2>err.txt until",
+    ],
+)
+def test_control_flow_keyword_after_separators(script):
+    with pytest.raises(ParseError, match="control flow is not supported"):
+        to_script(script)
+
+
+@pytest.mark.parametrize(
+    "script,name,args",
+    [
+        ("echo for", "echo", ["for"]),
+        ("grep -r done .", "grep", ["-r", "done", "."]),
+        ("printf '%s\\n' if", "printf", ["'%s\\n'", "if"]),
+        ("ls if", "ls", ["if"]),
+        ("cat then else fi", "cat", ["then", "else", "fi"]),
+    ],
+)
+def test_keyword_as_argument_is_an_ordinary_word(script, name, args):
+    cmd = to_script(script).pipelines[0].commands[0]
+    assert cmd.name == name
+    assert cmd.args == args
+
+
+@pytest.mark.parametrize("script", ["'for' x", '"if" x', "'done'"])
+def test_quoted_keyword_is_not_a_keyword(script):
+    """Quoting strips keyword-hood, so the word resolves as a command name."""
+    to_script(script)  # no ParseError
+
+
+def test_keyword_as_redirect_target():
+    cmd = to_script("echo hi > for").pipelines[0].commands[0]
+    assert cmd.redirects[0].target == "for"
+
+
+def test_function_keyword_rejected():
+    with pytest.raises(ParseError, match="^function: function definitions"):
+        to_script("function greet { echo hi; }")
+
+
+@pytest.mark.parametrize(
+    "script", ["greet() { echo hi; }", "greet () { echo hi; }", "greet( ) { echo hi; }"]
+)
+def test_function_definition_form_rejected(script):
+    with pytest.raises(ParseError, match=r"^greet\(\): function definitions"):
+        to_script(script)
+
+
+def test_lone_paren_argument_is_not_a_function_definition():
+    """Only a parenthesis PAIR right after the name marks a definition."""
+    cmd = to_script("grep ( file").pipelines[0].commands[0]
+    assert cmd.args == ["(", "file"]
+
+
+def test_heredoc_body_may_contain_keywords():
+    """Bodies are pulled out before tokenizing, so they are inert text."""
+    fs = MemoryFS()
+    output = execute("cat <<EOF\nfor f in a b; do\n  echo $f\ndone\nEOF", fs)
+    assert output == "for f in a b; do\n  echo $f\ndone\n"
+
+
+def test_file_named_for_is_readable():
+    fs = MemoryFS()
+    execute("echo hello > for", fs)
+    assert execute("cat for", fs) == "hello\n"
+    assert "for" in execute("ls", fs)
+
+
+def test_control_flow_is_a_parse_error_not_a_terminal_error():
+    """Unrunnable script, like '$(...)': no transcript, no exit code."""
+    fs = MemoryFS()
+    with pytest.raises(ParseError) as exc:
+        execute("for f in a; do echo $f; done", fs)
+    assert not isinstance(exc.value, TerminalError)
+    assert not hasattr(exc.value, "exit_code")
