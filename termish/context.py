@@ -16,8 +16,11 @@ class PipeStream(io.TextIOWrapper):
     Pipes and redirects move bytes; handlers mostly want text, so this
     is a UTF-8 ``TextIOWrapper`` over an in-memory byte buffer, with
     undecodable input replaced by U+FFFD rather than raised on, and
-    newlines never translated (``\\r\\n`` in, ``\\r\\n`` out). Content
-    that must survive byte for byte goes through ``.buffer``.
+    newlines never translated (``\\r\\n`` in, ``\\r\\n`` out). A line
+    ends at ``\\n`` and nowhere else, which is what a ``StringIO`` gave
+    handlers that read line by line: a bare ``\\r`` stays inside its
+    line rather than ending one. Content that must survive byte for
+    byte goes through ``.buffer``.
 
     Text writes are passed straight to the byte buffer, so text and
     bytes land in the order they were written.
@@ -28,7 +31,7 @@ class PipeStream(io.TextIOWrapper):
             io.BytesIO(initial),
             encoding="utf-8",
             errors="replace",
-            newline="",
+            newline="\n",
             write_through=True,
         )
 
