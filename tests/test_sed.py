@@ -39,7 +39,9 @@ class TestSedSubstitution:
 
     def test_regex_metacharacters(self, fs):
         execute_script(to_script("echo 'abc123def456' > f.txt"), fs)
-        out = execute_script(to_script("sed 's/[0-9]+/NUM/g' f.txt"), fs)
+        out = execute_script(to_script("sed 's/[0-9]\\+/NUM/g' f.txt"), fs)
+        assert out == "abcNUMdefNUM\n"
+        out = execute_script(to_script("sed -E 's/[0-9]+/NUM/g' f.txt"), fs)
         assert out == "abcNUMdefNUM\n"
 
     def test_replacement_with_ampersand(self, fs):
@@ -49,7 +51,11 @@ class TestSedSubstitution:
 
     def test_replacement_with_backreference(self, fs):
         execute_script(to_script("echo 'hello world' > f.txt"), fs)
-        out = execute_script(to_script("sed 's/(hello) (world)/\\2 \\1/' f.txt"), fs)
+        out = execute_script(
+            to_script("sed 's/\\(hello\\) \\(world\\)/\\2 \\1/' f.txt"), fs
+        )
+        assert out == "world hello\n"
+        out = execute_script(to_script("sed -E 's/(hello) (world)/\\2 \\1/' f.txt"), fs)
         assert out == "world hello\n"
 
     def test_multiline_substitution(self, fs):

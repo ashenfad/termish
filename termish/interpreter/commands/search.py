@@ -15,6 +15,7 @@ from termish.errors import TerminalError
 from termish.fs import FileSystem
 
 from ._argparse import CommandArgParser
+from ._regex import bre_to_python
 
 
 def _collect_files(user_dir: str, out: list[str], fs: FileSystem) -> None:
@@ -33,61 +34,6 @@ def _collect_files(user_dir: str, out: list[str], fs: FileSystem) -> None:
         full = f"{prefix}/{entry}"
         if not fs.isdir(full):
             out.append(full)
-
-
-def _bre_alternation_to_ere(pattern: str) -> str:
-    r"""Convert a BRE pattern to Python-``re``-compatible ERE.
-
-    * Outside ``[...]``: ``\|`` becomes ``|`` (BRE alternation → ERE).
-    * Inside ``[...]``: backslashes are doubled so Python ``re`` treats
-      them as literal (matching GNU grep BRE, where ``\`` is always
-      literal inside a character class).
-    """
-    result: list[str] = []
-    i = 0
-    in_class = False
-    n = len(pattern)
-    while i < n:
-        ch = pattern[i]
-        if in_class:
-            if ch == "\\":
-                # BRE: \ is literal inside [...].  Emit \\ so Python re
-                # treats it as a literal backslash rather than an escape
-                # prefix.  The character after \ is emitted normally on
-                # the next iteration.
-                result.append("\\\\")
-                i += 1
-            elif ch == "]":
-                in_class = False
-                result.append(ch)
-                i += 1
-            else:
-                result.append(ch)
-                i += 1
-        else:
-            if ch == "\\" and i + 1 < n:
-                if pattern[i + 1] == "|":
-                    result.append("|")  # BRE \| → ERE |
-                    i += 2
-                else:
-                    result.append(pattern[i : i + 2])
-                    i += 2
-            elif ch == "[":
-                in_class = True
-                result.append("[")
-                i += 1
-                # [^ negation
-                if i < n and pattern[i] == "^":
-                    result.append("^")
-                    i += 1
-                # ] immediately after [ or [^ is a literal ]
-                if i < n and pattern[i] == "]":
-                    result.append("]")
-                    i += 1
-            else:
-                result.append(ch)
-                i += 1
-    return "".join(result)
 
 
 def grep(ctx: CommandContext) -> CommandResult | None:
@@ -120,7 +66,7 @@ def grep(ctx: CommandContext) -> CommandResult | None:
 
     parsed, unknown = parser.parse_known_args(args)
     if unknown:
-        raise TerminalError(f"grep: unknown option: {unknown[0]}")
+        raise TerminalError(f"grep: unknown option: {unknown[0]}", exit_code=2)
 
     # Resolve patterns and file list.
     # With -e: all positional args are files.
@@ -130,7 +76,7 @@ def grep(ctx: CommandContext) -> CommandResult | None:
         parsed.files = parsed.positional
     else:
         if not parsed.positional:
-            raise TerminalError("grep: no pattern given")
+            raise TerminalError("grep: no pattern given", exit_code=2)
         raw_patterns = [parsed.positional[0]]
         parsed.files = parsed.positional[1:]
 
@@ -145,18 +91,16 @@ def grep(ctx: CommandContext) -> CommandResult | None:
     if parsed.ignore_case:
         flags |= re.IGNORECASE
 
-    # Build combined regex from all patterns (OR'd together).
-    # Python's re module uses ERE-like syntax (| for alternation), but
-    # agents commonly use BRE-style \| for alternation.  When not in
-    # -F (fixed-string) or -E mode, convert BRE \| to ERE | so both
-    # styles work.  This makes grep "a\|b" and grep -E "a|b" equivalent.
+    # Build combined regex from all patterns (OR'd together). Without -E
+    # or -F a pattern is a POSIX basic regex, the syntax agents write,
+    # read into Python's: grep 'a\+' and grep -E 'a+' mean the same.
     compiled_parts = []
     for pat in raw_patterns:
         p = pat
         if parsed.fixed_strings:
             p = re.escape(p)
         elif not parsed.extended_regexp:
-            p = _bre_alternation_to_ere(p)
+            p = bre_to_python(p)
         if parsed.word_regexp:
             p = r"\b" + p + r"\b"
         compiled_parts.append(p)
@@ -165,7 +109,7 @@ def grep(ctx: CommandContext) -> CommandResult | None:
     try:
         regex = re.compile(combined, flags)
     except re.error as e:
-        raise TerminalError(f"grep: invalid regex: {e}")
+        raise TerminalError(f"grep: invalid regex: {e}", exit_code=2)
 
     matches_total = 0
     has_context = before_context > 0 or after_context > 0
@@ -309,7 +253,7 @@ def grep(ctx: CommandContext) -> CommandResult | None:
     if not parsed.files and not parsed.recursive:
         content = stdin.read()
         process_content(content, None)
-        return
+        return _matched(matches_total > 0)
 
     files_to_search = []
 
@@ -347,6 +291,7 @@ def grep(ctx: CommandContext) -> CommandResult | None:
         ]
 
     multiple_files = len(files_to_search) > 1 or parsed.recursive
+    listed = False  # a file -L printed
 
     for filepath in files_to_search:
         try:
@@ -370,13 +315,26 @@ def grep(ctx: CommandContext) -> CommandResult | None:
             file_matches = process_content(content, label)
             if parsed.files_without_match and file_matches == 0:
                 real_stdout.write(f"{filepath}\n")
+                listed = True
 
         except FileNotFoundError:
-            raise TerminalError(f"grep: {filepath}: No such file or directory")
+            raise TerminalError(
+                f"grep: {filepath}: No such file or directory", exit_code=2
+            )
         except IsADirectoryError:
-            raise TerminalError(f"grep: {filepath}: Is a directory")
+            raise TerminalError(f"grep: {filepath}: Is a directory", exit_code=2)
         except Exception as e:
-            raise TerminalError(f"grep: {filepath}: {e}")
+            raise TerminalError(f"grep: {filepath}: {e}", exit_code=2)
+
+    # -L succeeds by naming a file; everything else by matching a line.
+    return _matched(listed if parsed.files_without_match else matches_total > 0)
+
+
+def _matched(found: bool) -> CommandResult | None:
+    """grep's exit status: 0 when something was found, 1 when nothing
+    was, silently — as GNU grep, so ``grep ... || ...`` and ``$?`` read
+    the way agents expect. Errors raise with status 2 instead."""
+    return None if found else CommandResult(exit_code=1, stderr="")
 
 
 # ---------------------------------------------------------------------------
