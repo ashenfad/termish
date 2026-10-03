@@ -22,6 +22,10 @@ from .commands import jq as jq_cmd
 from .commands import sed as sed_cmd
 from .commands._util import resolve_path
 
+#: The redirect target that discards: written to, nothing is kept;
+#: read from, it is empty. Never a file in the filesystem.
+DEV_NULL = "/dev/null"
+
 # Context var holding injected commands for the current execution.
 # Set by execute_script() so that meta-commands like xargs can resolve
 # injected commands without threading a parameter through every call.
@@ -276,11 +280,16 @@ def _execute_pipeline(
                 cmd_stdin = PipeStream((input_redirect.content or "").encode("utf-8"))
             else:
                 target = _expand_word(input_redirect.target, env, last_exit_code)
-                path = resolve_path(target, fs)
-                try:
-                    cmd_stdin = PipeStream(fs.read(path))
-                except Exception as e:
-                    raise TerminalError(f"{cmd_name}: {target}: {e}")
+                if target == DEV_NULL:
+                    # Reads as empty, as in bash: there is no device to
+                    # open, and no file of that name should be needed.
+                    cmd_stdin = PipeStream(b"")
+                else:
+                    path = resolve_path(target, fs)
+                    try:
+                        cmd_stdin = PipeStream(fs.read(path))
+                    except Exception as e:
+                        raise TerminalError(f"{cmd_name}: {target}: {e}")
 
         # Stderr routing — last stderr redirect wins (bash)
         stderr_redirect = next(
@@ -354,7 +363,7 @@ def _execute_pipeline(
             # 2>file truncates (even when no stderr was produced, as in
             # bash); 2>>file appends; /dev/null discards.
             target = _expand_word(stderr_redirect.target, env, last_exit_code)
-            if target != "/dev/null":
+            if target != DEV_NULL:
                 path = resolve_path(target, fs)
                 try:
                     _write_to_file(
@@ -385,6 +394,12 @@ def _execute_pipeline(
         if output_redirects:
             for r in output_redirects:
                 target = _expand_word(r.target, env, last_exit_code)
+                if target == DEV_NULL:
+                    # Discarded, as stderr's 2>/dev/null already was.
+                    # Written as a file it lands in the filesystem as
+                    # /dev/null, where every later listing and diff of
+                    # the tree finds it.
+                    continue
                 path = resolve_path(target, fs)
                 try:
                     _write_to_file(path, output_bytes, r.type == ">>", fs)
