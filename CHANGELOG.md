@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`test` and `[`** (issue #23). Agents write `[ -f x ] && ...`, `test -d out || mkdir out` and `[ -z "$VAR" ]`, and each was `command not found`, which a real-bash rung does not say. The POSIX subset is implemented:
+  - file tests `-e` `-f` `-d` `-s` `-r` `-w` `-x`;
+  - string tests `-z` `-n`, `=` (and bash's `==`) `!=`, and a bare string, true when it is not empty;
+  - integer tests `-eq` `-ne` `-lt` `-le` `-gt` `-ge`;
+  - `!`, `-a`, `-o` and parentheses, with POSIX's reading of one to four arguments by their count.
+
+  True exits 0, false exits 1 silently, and a malformed expression, a missing `]` or a non-integer operand exits 2 with a diagnostic, as in bash; nothing reaches stdout. The filesystem has no permission bits, so `-r` and `-w` are true for any path that exists, and `-x` is true for a directory and false for a file. Not supported: `[[ ]]`, `-nt`/`-ot`, `-L` and pattern matching. The parse error for `if` now says to test with `[ ... ]` and branch with `&&` and `||`.
+
 ### Changed
 - **grep and sed read POSIX basic regexes without `-E`, as GNU's do.** A pattern went to Python's `re` unchanged, so the BRE agents write meant something else: `\+`, `\?` and `\{n\}` read as literal characters, and `sed 's/a\+/X/'` matched nothing and still exited 0. `\(...\)` groups failed ("invalid group reference"), and a bare `(` was a syntax error rather than a parenthesis. Only grep's `\|` was translated. Now, without `-E` (grep also skips `-F`), a pattern is read as BRE, in sed's `s///` and its `/re/` addresses as well as in grep:
   - `\( \) \{ \} \| \+ \?` are operators, and their bare forms are literal characters.

@@ -14,7 +14,7 @@ from termish.errors import CommandFunc, TerminalError
 from termish.fs import FileSystem
 from termish.quote_masker import mask_quotes, unmask_and_unquote
 
-from .commands import archive, control, filesystem, meta, search, text
+from .commands import archive, conditional, control, filesystem, meta, search, text
 from .commands import diff as diff_cmd
 from .commands import file as file_mod
 from .commands import io as io_cmds
@@ -104,6 +104,8 @@ BUILTINS: dict[str, CommandFunc] = {
     # Control
     "true": control.true_cmd,
     "false": control.false_cmd,
+    "test": conditional.test_cmd,
+    "[": conditional.bracket_cmd,
 }
 
 

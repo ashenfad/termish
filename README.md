@@ -10,7 +10,7 @@ Parses and executes shell scripts (pipelines, redirects, semicolons) against any
 - **Variable expansion** -- `$?` (last exit code), `$VAR` / `${VAR}` from an env dict; expands in unquoted and double-quoted contexts, literal in single quotes
 - **Binary-safe pipelines** -- pipes and redirects carry bytes, so `cat bin.dat > copy.dat` is byte-identical and `cat file.gz | zcat` works; text decoding happens at each command's own boundary, and the returned transcript is decoded once for display
 - **Terminal-faithful transcript** -- stderr diagnostics appear in the returned output when execution continues past a failure (`cmd; next`, `cmd || rescue`), like a real terminal screen; a failure with nothing after it raises `TerminalError`. Stderr redirects are honored: `2>file` captures, `2>/dev/null` suppresses, `2>&1` merges into the pipe (`cmd 2>&1 | head` works)
-- **37 builtins** -- ls, cat, echo, printf, grep, find, sed, tr, sort, uniq, cut, wc, diff, tar, gzip, zcat, zip, jq, xargs, file, true, false, basename, dirname, ...
+- **39 builtins** -- ls, cat, echo, printf, grep, find, sed, tr, sort, uniq, cut, wc, diff, tar, gzip, zcat, zip, jq, xargs, file, test/[, true, false, basename, dirname, ...
 - **Custom commands** -- inject your own command handlers alongside builtins; injected commands override builtins and compose in pipelines
 - **jq engine** -- built-in jq filter parser and evaluator (field access, pipes, functions, conditionals)
 - **Pluggable filesystem** -- `FileSystem` is a `typing.Protocol`; any object with the right methods works
@@ -167,7 +167,7 @@ That is not a coincidence, and it is a promise: termish's `FileSystem` protocol 
 | Meta | `xargs` |
 | JSON | `jq` |
 | Inspection | `file` |
-| Control | `true`, `false` |
+| Control | `true`, `false`, `test` / `[` |
 
 ## Development
 
