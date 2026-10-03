@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **grep and sed read POSIX basic regexes without `-E`, as GNU's do.** A pattern went to Python's `re` unchanged, so the BRE agents write meant something else: `\+`, `\?` and `\{n\}` read as literal characters, and `sed 's/a\+/X/'` matched nothing and still exited 0. `\(...\)` groups failed ("invalid group reference"), and a bare `(` was a syntax error rather than a parenthesis. Only grep's `\|` was translated. Now, without `-E` (grep also skips `-F`), a pattern is read as BRE, in sed's `s///` and its `/re/` addresses as well as in grep:
+  - `\( \) \{ \} \| \+ \?` are operators, and their bare forms are literal characters.
+  - A leading `*` is literal, `^` and `$` anchor only at the ends, and `\<` / `\>` are word boundaries.
+  - Back-references `\1`-`\9` work, and so does every `-E` form, which passes through untouched.
+
+  This changes what some patterns mean. Without `-E`, a bare `|`, `+`, `?` or `( )` used to work as an operator and is now a literal character, as in GNU: `grep 'a|b'` looks for the text `a|b`. Use `\|` or `-E`.
+- **grep exits 1 when nothing matches**, and 2 on an error such as a bad pattern or a missing file. It used to exit 0 either way, so `grep ... || ...` and `$?` could not tell. `-c` prints `0` and exits 1. `-q` follows the same rule. `-L` succeeds when it names a file.
+- **A silent failure before a pipeline's last stage no longer stops it**, as in bash without `pipefail`: the pipeline's status is its last stage's. `grep x f | wc -l` prints `0` where there is no `x`, and `false | wc -l` prints `0`. A command that fails with a diagnostic, like `cat /missing`, still stops the pipeline.
+
+### Fixed
+- **`>/dev/null` discards.** Only `2>/dev/null` did: `>` and `>>` wrote a file named `/dev/null` into the filesystem, so a command an agent silenced left that file behind, where every later listing, status and diff of the tree found it -- one agent's commit swept it in with its work. Output redirected to `/dev/null` is now dropped, and `< /dev/null` reads as empty input, as in bash, rather than failing on a file that is not there. No redirect to `/dev/null` touches the filesystem.
+
 ## [0.2.0] - 2026-09-20
 
 ### Added
