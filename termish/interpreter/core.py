@@ -26,6 +26,14 @@ from .commands._util import resolve_path
 #: read from, it is empty. Never a file in the filesystem.
 DEV_NULL = "/dev/null"
 
+
+def _is_dev_null(target: str, fs: FileSystem) -> bool:
+    """Whether a redirect target names /dev/null, however it is spelled:
+    ``dev/null`` from ``/`` and ``/dev/./null`` are the same path, and a
+    comparison of spellings would write them as a file."""
+    return resolve_path(target, fs) == DEV_NULL
+
+
 # Context var holding injected commands for the current execution.
 # Set by execute_script() so that meta-commands like xargs can resolve
 # injected commands without threading a parameter through every call.
@@ -286,7 +294,7 @@ def _execute_pipeline(
                 cmd_stdin = PipeStream((input_redirect.content or "").encode("utf-8"))
             else:
                 target = _expand_word(input_redirect.target, env, last_exit_code)
-                if target == DEV_NULL:
+                if _is_dev_null(target, fs):
                     # Reads as empty, as in bash: there is no device to
                     # open, and no file of that name should be needed.
                     cmd_stdin = PipeStream(b"")
@@ -375,7 +383,7 @@ def _execute_pipeline(
             # 2>file truncates (even when no stderr was produced, as in
             # bash); 2>>file appends; /dev/null discards.
             target = _expand_word(stderr_redirect.target, env, last_exit_code)
-            if target != DEV_NULL:
+            if not _is_dev_null(target, fs):
                 path = resolve_path(target, fs)
                 try:
                     _write_to_file(
@@ -406,7 +414,7 @@ def _execute_pipeline(
         if output_redirects:
             for r in output_redirects:
                 target = _expand_word(r.target, env, last_exit_code)
-                if target == DEV_NULL:
+                if _is_dev_null(target, fs):
                     # Discarded, as stderr's 2>/dev/null already was.
                     # Written as a file it lands in the filesystem as
                     # /dev/null, where every later listing and diff of
