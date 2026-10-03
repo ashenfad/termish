@@ -32,6 +32,12 @@ def fs():
         ("[ -x out ] && echo enterable", "enterable\n"),
         ("[ -x a.txt ] || echo not-runnable", "not-runnable\n"),
         ("[ -r a.txt -a -w a.txt ] && echo rw", "rw\n"),
+        # an empty operand names no path: every file test on it is false
+        ('[ -e "$UNSET" ]; echo $?', "1\n"),
+        ('[ -d "$UNSET" ] || echo no-dir', "no-dir\n"),
+        ('[ -f "" ]; echo $?', "1\n"),
+        ('[ -s "" ]; echo $?', "1\n"),
+        ('[ -r "" -o -w "" -o -x "" ]; echo $?', "1\n"),
         # strings
         ('[ -z "$X" ] && echo z', "z\n"),
         ('[ -n "$X" ] || echo unset', "unset\n"),
@@ -43,6 +49,8 @@ def fs():
         ("[ 3 -lt 10 ] && echo lt", "lt\n"),
         ("[ 05 -eq 5 ]; echo $?", "0\n"),
         ("[ -3 -lt 2 ]; echo $?", "0\n"),
+        ("[ 9223372036854775807 -gt 0 ]; echo $?", "0\n"),
+        ("[ -9223372036854775808 -lt 0 ]; echo $?", "0\n"),
         # logic
         ("[ ! ]; echo $?", "0\n"),
         ("[ ! = x ]; echo $?", "1\n"),  # three arguments: '=' is the operator
@@ -62,6 +70,15 @@ def test_matches_bash(fs, command, expected):
     "command, message",
     [
         ("[ abc -eq 1 ]; echo $?", "[: abc: integer expression expected\n2\n"),
+        # signed 64-bit, as in bash: one past either end is not an integer
+        (
+            "[ 9223372036854775808 -gt 0 ]; echo $?",
+            "[: 9223372036854775808: integer expression expected\n2\n",
+        ),
+        (
+            "[ -9223372036854775809 -lt 0 ]; echo $?",
+            "[: -9223372036854775809: integer expression expected\n2\n",
+        ),
         ("[ -f a.txt ; echo $?", "[: missing `]'\n2\n"),
         ("test 1 -gt; echo $?", "test: 1: unary operator expected\n2\n"),
     ],

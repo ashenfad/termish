@@ -34,6 +34,8 @@ from ._util import resolve_path
 _UNARY = {"-e", "-f", "-d", "-s", "-r", "-w", "-x", "-z", "-n"}
 _BINARY = {"=", "==", "!=", "-eq", "-ne", "-lt", "-le", "-gt", "-ge"}
 _INTEGER = re.compile(r"^\s*[+-]?\d+\s*$")
+#: bash's integers are signed 64-bit; past either end is not an integer.
+_INT_MIN, _INT_MAX = -(2**63), 2**63 - 1
 
 
 class _Usage(Exception):
@@ -163,6 +165,10 @@ def _unary(op: str, operand: str, fs: FileSystem) -> bool:
         return operand == ""
     if op == "-n":
         return operand != ""
+    if operand == "":
+        # No path at all, not the current directory: an unset variable
+        # in `[ -d "$OUT" ]` must not test whatever the shell stands in.
+        return False
     path = resolve_path(operand, fs)
     if not fs.exists(path):
         return False
@@ -198,6 +204,7 @@ def _binary(left: str, op: str, right: str) -> bool:
 
 
 def _integer(text: str) -> int:
-    if not _INTEGER.match(text):
+    value = int(text.strip()) if _INTEGER.match(text) else None
+    if value is None or not _INT_MIN <= value <= _INT_MAX:
         raise _Usage(f"{text}: integer expression expected")
-    return int(text.strip())
+    return value
