@@ -51,3 +51,15 @@ def test_reading_dev_null_is_empty(fs):
 def test_another_file_still_writes(fs):
     execute("echo hi > /out.txt", fs)
     assert fs.read("/out.txt") == b"hi\n"
+
+
+@pytest.mark.parametrize("target", ["/dev/./null", "/dev//null", "/tmp/../dev/null"])
+def test_any_spelling_of_dev_null_discards(fs, target):
+    assert execute(f"echo hi > {target}; echo ok", fs) == "ok\n"
+    assert not fs.exists("/dev/null")
+
+
+def test_a_relative_spelling_of_dev_null_discards(fs):
+    out = execute("cd / && echo hi > dev/null && wc -c < dev/null", fs)
+    assert out.strip() == "0"
+    assert not fs.exists("/dev/null")
