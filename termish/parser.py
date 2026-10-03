@@ -42,7 +42,7 @@ def _reject_control_flow(word: str) -> None:
         if word in _LOOP_KEYWORDS:
             advice = "; use xargs or find -exec for iteration"
         elif word in _CONDITIONAL_KEYWORDS:
-            advice = "; use && and || for conditionals"
+            advice = "; test with [ ... ] and branch with && and || instead"
         else:
             advice = ""
         raise ParseError(f"{word}: control flow is not supported{advice}")

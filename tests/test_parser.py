@@ -546,3 +546,14 @@ def test_control_flow_is_a_parse_error_not_a_terminal_error():
         execute("for f in a; do echo $f; done", fs)
     assert not isinstance(exc.value, TerminalError)
     assert not hasattr(exc.value, "exit_code")
+
+
+def test_a_conditional_points_at_test_and_the_operators():
+    """`test` and `[` exist now, so the advice for `if` names the whole
+    replacement: test with `[ ... ]`, branch with `&&` and `||`."""
+    with pytest.raises(ParseError) as exc:
+        to_script("if [ -f a ]; then echo y; fi")
+    assert str(exc.value) == (
+        "if: control flow is not supported; "
+        "test with [ ... ] and branch with && and || instead"
+    )
