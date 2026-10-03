@@ -140,7 +140,7 @@ class TestGrepFlags:
 
     def test_grep_only_matching(self, fs):
         fs.write("/f.txt", b"abc 123 def 456\n")
-        out = execute_script(to_script("grep -o '[0-9]+' f.txt"), fs)
+        out = execute_script(to_script("grep -oE '[0-9]+' f.txt"), fs)
         assert "123\n" in out
         assert "456\n" in out
 
@@ -283,10 +283,12 @@ class TestGrepQuiet:
         assert out == "found\n"
 
     def test_quiet_no_match_still_silent(self, fs):
-        """grep -q with no match should still produce no output."""
+        """grep -q with no match produces no output and exits 1, silently."""
         fs.write("/f.txt", b"hello\n")
-        out = execute_script(to_script("grep -q nope f.txt"), fs)
-        assert out == ""
+        with pytest.raises(TerminalError) as exc:
+            execute_script(to_script("grep -q nope f.txt"), fs)
+        assert exc.value.exit_code == 1
+        assert exc.value.stderr == ""
 
 
 # ---------------------------------------------------------------------------
@@ -305,8 +307,9 @@ class TestGrepFilesWithoutMatch:
     def test_files_without_match_all_match(self, fs):
         fs.write("/a.txt", b"hello\n")
         fs.write("/b.txt", b"hello world\n")
-        out = execute_script(to_script("grep -L hello a.txt b.txt"), fs)
-        assert out == ""
+        # nothing to list: no output, and status 1 (GNU grep 3.5+)
+        out = execute_script(to_script("grep -L hello a.txt b.txt; echo $?"), fs)
+        assert out == "1\n"
 
     def test_files_without_match_none_match(self, fs):
         fs.write("/a.txt", b"foo\n")
@@ -360,12 +363,15 @@ class TestGrepBREAlternation:
         assert "apple" in out
         assert "cherry" in out
 
-    def test_ere_pipe_without_flag(self, fs):
-        """Bare | (ERE style) should also work since Python re is ERE-like."""
-        fs.write("/f.txt", b"apple\nbanana\ncherry\n")
-        out = execute_script(to_script("grep 'apple|cherry' f.txt"), fs)
-        assert "apple" in out
-        assert "cherry" in out
+    def test_bare_pipe_without_flag_is_literal(self, fs):
+        """In BRE a bare | is a literal character, as in GNU grep: the
+        alternation is \\| without -E and | with it."""
+        fs.write("/f.txt", b"apple\nbanana\ncherry\na|b\n")
+        out = execute_script(to_script("grep 'apple|cherry' f.txt; echo $?"), fs)
+        assert out == "1\n"
+        assert execute_script(to_script("grep 'a|b' f.txt"), fs) == "a|b\n"
+        out = execute_script(to_script("grep -E 'apple|cherry' f.txt"), fs)
+        assert out == "apple\ncherry\n"
 
     def test_ere_backslash_pipe_is_literal(self, fs):
         """With -E, \\| should match a literal pipe (ERE semantics)."""

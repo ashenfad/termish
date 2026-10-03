@@ -9,6 +9,7 @@ from termish.context import CommandContext, CommandResult
 from termish.errors import TerminalError
 
 from ._argparse import CommandArgParser
+from ._regex import bre_to_python
 
 # ---------------------------------------------------------------------------
 # Data model
@@ -101,8 +102,12 @@ def _translate_replacement(repl: str) -> str:
     return "".join(result)
 
 
-def _parse_address(text: str, pos: int) -> tuple[_Address | None, int]:
-    """Parse a single address at *pos*. Returns (address | None, new_pos)."""
+def _parse_address(
+    text: str, pos: int, extended: bool = False
+) -> tuple[_Address | None, int]:
+    """Parse a single address at *pos*. Returns (address | None, new_pos).
+
+    ``extended`` is ``-E``: without it the pattern is a POSIX basic regex."""
     if pos >= len(text):
         return None, pos
 
@@ -123,7 +128,7 @@ def _parse_address(text: str, pos: int) -> tuple[_Address | None, int]:
     if ch == "/":
         content, new_pos = _scan_delimited(text, pos + 1, "/")
         try:
-            compiled = re.compile(content)
+            compiled = re.compile(content if extended else bre_to_python(content))
         except re.error as e:
             raise TerminalError(f"sed: invalid regex in address: {e}")
         return _Address(regex=compiled), new_pos
@@ -131,8 +136,13 @@ def _parse_address(text: str, pos: int) -> tuple[_Address | None, int]:
     return None, pos
 
 
-def _parse_substitution(text: str, pos: int) -> tuple[re.Pattern[str], str, str, int]:
+def _parse_substitution(
+    text: str, pos: int, extended: bool = False
+) -> tuple[re.Pattern[str], str, str, int]:
     """Parse ``s/pattern/replacement/flags`` starting after the ``s``.
+
+    ``extended`` is ``-E``: without it the pattern is a POSIX basic regex,
+    read into Python's syntax (``s/a\\+/X/`` means one or more ``a``).
 
     Returns (compiled_pattern, translated_replacement, flags, new_pos).
     """
@@ -161,7 +171,8 @@ def _parse_substitution(text: str, pos: int) -> tuple[re.Pattern[str], str, str,
         re_flags |= re.IGNORECASE
 
     try:
-        compiled = re.compile(raw_pattern, re_flags)
+        pattern = raw_pattern if extended else bre_to_python(raw_pattern)
+        compiled = re.compile(pattern, re_flags)
     except re.error as e:
         raise TerminalError(f"sed: invalid regex: {e}")
 
@@ -169,7 +180,7 @@ def _parse_substitution(text: str, pos: int) -> tuple[re.Pattern[str], str, str,
     return compiled, replacement, flags_str, pos
 
 
-def _parse_single_command(text: str) -> _SedCommand:
+def _parse_single_command(text: str, extended: bool = False) -> _SedCommand:
     """Parse a single sed command string (e.g. ``3,5s/a/b/g`` or ``$d``)."""
     text = text.strip()
     if not text:
@@ -178,13 +189,13 @@ def _parse_single_command(text: str) -> _SedCommand:
     pos = 0
 
     # Parse first address
-    addr1, pos = _parse_address(text, pos)
+    addr1, pos = _parse_address(text, pos, extended)
 
     # Check for comma → second address
     addr2 = None
     if addr1 is not None and pos < len(text) and text[pos] == ",":
         pos += 1
-        addr2, pos = _parse_address(text, pos)
+        addr2, pos = _parse_address(text, pos, extended)
         if addr2 is None:
             raise TerminalError("sed: invalid address range")
 
@@ -198,7 +209,7 @@ def _parse_single_command(text: str) -> _SedCommand:
     pos += 1
 
     if cmd_char == "s":
-        pattern, replacement, sub_flags, pos = _parse_substitution(text, pos)
+        pattern, replacement, sub_flags, pos = _parse_substitution(text, pos, extended)
         cmd = _SedCommand(
             address=addr_range,
             command="s",
@@ -322,10 +333,11 @@ def _split_script(script: str) -> list[str]:
     return parts
 
 
-def _parse_sed_script(script: str) -> list[_SedCommand]:
-    """Parse a full sed script into a list of commands."""
+def _parse_sed_script(script: str, extended: bool = False) -> list[_SedCommand]:
+    """Parse a full sed script into a list of commands; ``extended`` is
+    ``-E``, without which its patterns are POSIX basic regexes."""
     parts = _split_script(script)
-    return [_parse_single_command(p) for p in parts]
+    return [_parse_single_command(p, extended) for p in parts]
 
 
 # ---------------------------------------------------------------------------
@@ -478,8 +490,8 @@ def sed(ctx: CommandContext) -> CommandResult | None:
     parser.add_argument("-n", "--quiet", "--silent", action="store_true")
     parser.add_argument("-i", "--in-place", action="store_true")
     parser.add_argument("-e", "--expression", action="append", dest="expressions")
-    # -E/-r: extended regex. Python's re module uses ERE by default, so this
-    # is accepted for compatibility but doesn't change behavior.
+    # -E/-r: extended regex, which is the syntax Python's re speaks.
+    # Without it a pattern is a POSIX basic regex, translated first.
     parser.add_argument("-E", "-r", "--regexp-extended", action="store_true")
     parser.add_argument("args_remainder", nargs="*")
 
@@ -503,7 +515,7 @@ def sed(ctx: CommandContext) -> CommandResult | None:
     # Parse all expressions
     commands: list[_SedCommand] = []
     for expr in expressions:
-        commands.extend(_parse_sed_script(expr))
+        commands.extend(_parse_sed_script(expr, parsed.regexp_extended))
 
     if not commands:
         raise TerminalError("sed: no expression given")

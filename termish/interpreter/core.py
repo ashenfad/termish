@@ -34,6 +34,11 @@ _injected_commands: contextvars.ContextVar[Mapping[str, CommandFunc]] = (
 )
 
 
+def result_stderr(result: object) -> str:
+    """A command result's stderr text, or "" for none or no result."""
+    return getattr(result, "stderr", "") or ""
+
+
 def _resolve_command(name: str) -> CommandFunc | None:
     """Look up a command by name: injected commands override built-ins."""
     injected = _injected_commands.get()
@@ -250,7 +255,8 @@ def _execute_pipeline(
     current_input: bytes | None = None
     merged_failure: TerminalError | None = None
 
-    for cmd_node in pipeline.commands:
+    last_stage = len(pipeline.commands) - 1
+    for stage, cmd_node in enumerate(pipeline.commands):
         cmd_stdin = PipeStream(current_input or b"")
         cmd_stdout = PipeStream()
 
@@ -316,7 +322,13 @@ def _execute_pipeline(
                 env=env,
             )
             result = cmd_func(ctx)
-            if result is not None and result.exit_code != 0:
+            # A stage before the last that fails SILENTLY — grep that
+            # matched nothing, false — hands its output on and the
+            # pipeline goes on, as bash's does without pipefail: the
+            # pipeline's status is its last stage's. `grep x f | wc -l`
+            # prints 0. A failure with a diagnostic still stops it.
+            silent_mid = stage != last_stage and not result_stderr(result)
+            if result is not None and result.exit_code != 0 and not silent_mid:
                 raise TerminalError(
                     f"{cmd_name}: {result.stderr}"
                     if result.stderr
