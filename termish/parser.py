@@ -237,8 +237,9 @@ def to_script(text: str) -> Script:
     # be treated as part of words.  Without this, "user@host" splits into
     # ["user", "@", "host"], "100%" into ["100", "%"], etc.
     # "$?{}" keeps variable forms ("$?", "$NAME", "${NAME}") intact as
-    # single words for execution-time expansion.
-    lexer.wordchars += ":@,%+!^$?{}"
+    # single words for execution-time expansion. "[]" keeps a glob's
+    # class ("a/[bc]*") one word; `[ -f x ]` still splits on its spaces.
+    lexer.wordchars += ":@,%+!^$?{}[]"
 
     # Treat newlines as tokens, not whitespace, so we can use them as separators
     lexer.whitespace = " \t\r"

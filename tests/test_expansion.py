@@ -141,7 +141,8 @@ class TestVarExpansion:
         fs.write("/a.txt", b"")
         fs.write("/b.txt", b"")
         out = execute("echo $PAT", fs, env={"PAT": "*.txt"})
-        assert sorted(out.split()) == ["/a.txt", "/b.txt"]
+        # a relative pattern expands to relative paths, as in bash
+        assert sorted(out.split()) == ["a.txt", "b.txt"]
 
     def test_env_mutation_visible_to_later_commands(self, fs):
         def setvar(ctx: CommandContext) -> CommandResult | None:
