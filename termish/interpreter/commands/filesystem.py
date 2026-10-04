@@ -91,108 +91,112 @@ def ls(ctx: CommandContext) -> CommandResult | None:
     if unknown:
         raise TerminalError(f"ls: unknown option: {unknown[0]}")
 
-    for i, path in enumerate(parsed.paths):
-        if len(parsed.paths) > 1:
-            stdout.write(f"{path}:\n")
+    def long_line(path: str, type_char: str) -> str:
+        meta = fs.stat(path)
+        if parsed.human_readable:
+            size = _human_readable_size(meta.size).rjust(6)
+        else:
+            size = str(meta.size).rjust(8)
+        time = meta.modified_at[:16].replace("T", " ") if meta.modified_at else " " * 16
+        return f"{type_char}rw-r--r-- 1 agent agent {size} {time} {path}\n"
 
-        try:
-            # -d: list directories themselves, not their contents
-            if parsed.directory and fs.isdir(path):
-                if parsed.l:
-                    meta = fs.stat(path)
+    def list_dir(path: str) -> None:
+        needs_detailed = parsed.l or parsed.t or parsed.S or parsed.classify
+        if needs_detailed:
+            items = fs.list_detailed(path, recursive=parsed.R)
+            if not parsed.a:
+                items = [i for i in items if not i.name.startswith(".")]
+            if parsed.S:
+                items = sorted(items, key=lambda x: x.size, reverse=True)
+            elif parsed.t:
+                items = sorted(items, key=lambda x: x.modified_at or "", reverse=True)
+            if parsed.r:
+                items = list(reversed(items))
+
+            if parsed.l:
+                for item in items:
+                    type_char = "d" if item.is_dir else "-"
                     if parsed.human_readable:
-                        size = _human_readable_size(meta.size).rjust(6)
+                        size = _human_readable_size(item.size).rjust(6)
                     else:
-                        size = str(meta.size).rjust(8)
+                        size = str(item.size).rjust(8)
                     time = (
-                        meta.modified_at[:16].replace("T", " ")
-                        if meta.modified_at
+                        item.modified_at[:16].replace("T", " ")
+                        if item.modified_at
                         else " " * 16
                     )
-                    stdout.write(f"drw-r--r-- 1 agent agent {size} {time} {path}\n")
-                else:
-                    stdout.write(f"{path}\n")
-                continue
-
-            # Check if it is a file first
-            if fs.isfile(path):
-                if parsed.l:
-                    # List detailed for file
-                    meta = fs.stat(path)
-                    if parsed.human_readable:
-                        size = _human_readable_size(meta.size).rjust(6)
-                    else:
-                        size = str(meta.size).rjust(8)
-                    time = (
-                        meta.modified_at[:16].replace("T", " ")
-                        if meta.modified_at
-                        else " " * 16
+                    suffix = "/" if parsed.classify and item.is_dir else ""
+                    stdout.write(
+                        f"{type_char}rw-r--r-- 1 agent agent {size} {time} {item.path}{suffix}\n"
                     )
-                    stdout.write(f"-rw-r--r-- 1 agent agent {size} {time} {path}\n")
-                else:
-                    stdout.write(f"{path}\n")
-                continue
-
-            needs_detailed = parsed.l or parsed.t or parsed.S or parsed.classify
-            if needs_detailed:
-                items = fs.list_detailed(path, recursive=parsed.R)
-                if not parsed.a:
-                    items = [i for i in items if not i.name.startswith(".")]
-                if parsed.S:
-                    items = sorted(items, key=lambda x: x.size, reverse=True)
-                elif parsed.t:
-                    items = sorted(
-                        items, key=lambda x: x.modified_at or "", reverse=True
-                    )
-                if parsed.r:
-                    items = list(reversed(items))
-
-                if parsed.l:
-                    for item in items:
-                        type_char = "d" if item.is_dir else "-"
-                        if parsed.human_readable:
-                            size = _human_readable_size(item.size).rjust(6)
-                        else:
-                            size = str(item.size).rjust(8)
-                        time = (
-                            item.modified_at[:16].replace("T", " ")
-                            if item.modified_at
-                            else " " * 16
-                        )
-                        suffix = "/" if parsed.classify and item.is_dir else ""
-                        stdout.write(
-                            f"{type_char}rw-r--r-- 1 agent agent {size} {time} {item.path}{suffix}\n"
-                        )
-                else:
-                    filtered = [
-                        item.path + ("/" if parsed.classify and item.is_dir else "")
-                        for item in items
-                    ]
-                    if filtered:
-                        stdout.write("\n".join(filtered) + "\n")
             else:
-                items_str = fs.list(path, recursive=parsed.R)
                 filtered = [
-                    p
-                    for p in items_str
-                    if parsed.a or not p.split("/")[-1].startswith(".")
+                    item.path + ("/" if parsed.classify and item.is_dir else "")
+                    for item in items
                 ]
-                if parsed.r:
-                    filtered = list(reversed(filtered))
                 if filtered:
                     stdout.write("\n".join(filtered) + "\n")
+        else:
+            items_str = fs.list(path, recursive=parsed.R)
+            filtered = [
+                p for p in items_str if parsed.a or not p.split("/")[-1].startswith(".")
+            ]
+            if parsed.r:
+                filtered = list(reversed(filtered))
+            if filtered:
+                stdout.write("\n".join(filtered) + "\n")
 
-        except FileNotFoundError:
-            raise TerminalError(
-                f"ls: cannot access '{path}': No such file or directory"
-            )
-        except NotADirectoryError:
-            raise TerminalError(f"ls: cannot access '{path}': Not a directory")
-        except Exception as e:
-            raise TerminalError(f"ls: {e}")
+    # GNU's order: an operand that is missing is reported and the rest
+    # are listed; file operands (and, with -d, directories as entries)
+    # come first, by name and with no header; then each directory, by
+    # name, under a "dir:" header whenever there is more than one
+    # operand, with a blank line before every group after the first.
+    missing: list[str] = []
+    files: list[str] = []
+    dirs: list[str] = []
+    for path in parsed.paths:
+        try:
+            if fs.isdir(path):
+                (files if parsed.directory else dirs).append(path)
+            elif fs.isfile(path) or fs.exists(path):
+                files.append(path)
+            else:
+                missing.append(path)
+        except Exception:
+            missing.append(path)
+    files.sort(reverse=parsed.r)
+    dirs.sort(reverse=parsed.r)
+    errors = [f"ls: cannot access '{p}': No such file or directory" for p in missing]
+    if not files and not dirs:
+        raise TerminalError("\n".join(errors))
 
-        if i < len(parsed.paths) - 1:
-            stdout.write("\n")
+    try:
+        for path in files:
+            if parsed.l:
+                stdout.write(long_line(path, "d" if fs.isdir(path) else "-"))
+            else:
+                stdout.write(f"{path}\n")
+        headers = len(parsed.paths) > 1
+        for k, path in enumerate(dirs):
+            if files or k:
+                stdout.write("\n")
+            if headers:
+                stdout.write(f"{path}:\n")
+            list_dir(path)
+    except FileNotFoundError as e:
+        raise TerminalError(
+            f"ls: cannot access '{e.filename or e}': No such file or directory"
+        )
+    except NotADirectoryError as e:
+        raise TerminalError(f"ls: cannot access '{e.filename or e}': Not a directory")
+    except TerminalError:
+        raise
+    except Exception as e:
+        raise TerminalError(f"ls: {e}")
+
+    if errors:
+        return CommandResult(exit_code=2, stderr="\n".join(errors) + "\n")
+    return None
 
 
 def touch(ctx: CommandContext) -> CommandResult | None:

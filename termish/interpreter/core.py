@@ -21,6 +21,8 @@ from .commands import io as io_cmds
 from .commands import jq as jq_cmd
 from .commands import sed as sed_cmd
 from .commands._util import resolve_path
+from .pathglob import expand as expand_pathname
+from .pathglob import has_magic
 
 #: The redirect target that discards: written to, nothing is kept;
 #: read from, it is empty. Never a file in the filesystem.
@@ -535,9 +537,11 @@ def _expand_args(
             # Fully unquoted: word removal, then globbing
             if masked == "" and arg != "":
                 continue
-            if "*" in masked or "?" in masked:
+            if has_magic(masked):
+                # bash's pathname expansion, segment by segment (see
+                # pathglob); a word that matches nothing stays as typed
                 try:
-                    matches = fs.glob(masked)
+                    matches = expand_pathname(masked, fs)
                     expanded.extend(matches if matches else [masked])
                 except Exception:
                     expanded.append(masked)
