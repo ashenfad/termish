@@ -3,6 +3,7 @@ Filesystem commands for the terminal interpreter.
 """
 
 import posixpath
+from typing import Any
 
 from termish.context import CommandContext, CommandResult
 from termish.errors import TerminalError
@@ -164,8 +165,27 @@ def ls(ctx: CommandContext) -> CommandResult | None:
                 missing.append(path)
         except Exception:
             missing.append(path)
-    files.sort(reverse=parsed.r)
-    dirs.sort(reverse=parsed.r)
+
+    def operand_order(paths: list[str]) -> list[str]:
+        """Operands in the order their entries would be: by name, or by
+        size or time (largest and newest first) under -S and -t, and
+        reversed under -r."""
+        if parsed.S or parsed.t:
+
+            def key(p: str) -> Any:
+                try:
+                    meta = fs.stat(p)
+                except Exception:
+                    return 0 if parsed.S else ""
+                return meta.size if parsed.S else (meta.modified_at or "")
+
+            paths = sorted(sorted(paths), key=key, reverse=True)
+        else:
+            paths = sorted(paths)
+        return list(reversed(paths)) if parsed.r else paths
+
+    files = operand_order(files)
+    dirs = operand_order(dirs)
     errors = [f"ls: cannot access '{p}': No such file or directory" for p in missing]
     if not files and not dirs:
         raise TerminalError("\n".join(errors))
