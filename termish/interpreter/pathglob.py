@@ -8,7 +8,8 @@ against the filesystem one path segment at a time:
   included, and nothing below them;
 - a name starting with ``.`` is matched only by a segment that itself
   starts with ``.``, as with bash's ``dotglob`` off;
-- ``**`` matches zero or more directories (bash with ``globstar`` on);
+- ``**`` matches zero or more directories (bash with ``globstar`` on),
+  and a final ``**`` everything below, files included;
 - a trailing ``/`` matches directories only, and is kept;
 - the matches keep the word's own form: a relative word expands to
   relative paths and an absolute one to absolute paths, sorted.
@@ -84,6 +85,17 @@ def _exists(fs: Any, path: str) -> bool:
         return False
 
 
+def _everything(fs: Any, base: str, found: set[str]) -> None:
+    """Every entry below ``base`` that does not start with a dot."""
+    for name in _names(fs, base):
+        if name.startswith("."):
+            continue
+        path = _join(base, name)
+        found.add(path)
+        if _isdir(fs, path):
+            _everything(fs, path, found)
+
+
 def _walk(
     fs: Any, base: str, parts: list[str], i: int, trailing: bool, found: set[str]
 ) -> None:
@@ -96,6 +108,13 @@ def _walk(
         return
     part = parts[i]
     last = i == len(parts) - 1
+    if part == "**" and last and not trailing:
+        # a final ** names everything below: the base as a directory,
+        # then every entry at every depth, files as well as directories
+        if base:
+            found.add(base if base.endswith("/") else base + "/")
+        _everything(fs, base, found)
+        return
     if part == "**":
         # zero directories here, then one more level and ** again
         _walk(fs, base, parts, i + 1, trailing, found)

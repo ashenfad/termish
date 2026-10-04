@@ -36,6 +36,9 @@ def fs():
         # ** crosses directories, zero or more of them
         ("echo a/**/*.png", "a/bg/x.png a/bg/y.png a/cards/z.png"),
         ("echo a/**/top.txt", "a/top.txt"),
+        # a final ** names everything below, files included
+        ("echo a/**", "a/ a/bg a/bg/x.png a/bg/y.png a/cards a/cards/z.png a/top.txt"),
+        ("echo a/**/", "a/ a/bg/ a/cards/"),
         # dotfiles only for a pattern that starts with a dot
         ("echo a/.*", "a/.git a/.hid"),
         ("echo a/.h*", "a/.hid"),
@@ -99,3 +102,51 @@ def test_ls_reports_a_missing_operand_and_lists_the_rest(fs):
 def test_ls_with_nothing_to_list_is_an_error(fs):
     with pytest.raises(TerminalError, match="cannot access 'nope'"):
         execute("ls nope", fs)
+
+
+PATTERNS = [
+    "a/*",
+    "a/*/",
+    "a/*/*.png",
+    "a/**",
+    "a/**/",
+    "a/**/*.png",
+    "a/**/top.txt",
+    "a/.*",
+    "a/?g",
+    "a/[bc]*",
+    "a/[!b]*",
+    "*",
+    "**",
+    "a/nope*",
+]
+
+
+@pytest.mark.parametrize("pattern", PATTERNS)
+def test_expansion_agrees_with_pythons_glob(tmp_path, monkeypatch, pattern):
+    """Python's glob(recursive=True) follows bash's globstar, dotfiles
+    and trailing-slash rules, so a real directory tree is the reference."""
+    import glob as pyglob
+
+    for d in ("a/bg", "a/cards", "a/.git"):
+        (tmp_path / d).mkdir(parents=True)
+    for f in ("a/bg/x.png", "a/bg/y.png", "a/cards/z.png", "a/top.txt", "a/.hid"):
+        (tmp_path / f).write_text("")
+    monkeypatch.chdir(tmp_path)
+    expected = sorted(pyglob.glob(pattern, recursive=True)) or [pattern]
+
+    fs = MemoryFS()
+    execute(
+        "mkdir -p a/bg a/cards a/.git; touch a/bg/x.png a/bg/y.png a/cards/z.png "
+        "a/top.txt a/.hid",
+        fs,
+    )
+    assert execute(f"printf '%s\\n' {pattern}", fs).split() == expected
+
+
+def test_ls_orders_operands_by_size_and_time_under_s_and_t(fs):
+    fs.write("/small.txt", b"x")
+    fs.write("/big.txt", b"x" * 100)
+    assert execute("ls -S small.txt big.txt", fs) == "big.txt\nsmall.txt\n"
+    assert execute("ls -Sr small.txt big.txt", fs) == "small.txt\nbig.txt\n"
+    assert execute("ls small.txt big.txt", fs) == "big.txt\nsmall.txt\n"  # by name

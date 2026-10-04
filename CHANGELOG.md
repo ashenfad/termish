@@ -12,10 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `*`, `?` and classes never cross `/`: `a/*` names the entries directly under `a`, directories included. It used to reach into every subdirectory.
   - Matches keep the word's form: a relative pattern gives relative paths. They used to come back absolute.
   - A name starting with `.` matches only a pattern segment that starts with `.`.
-  - `**` matches zero or more directories, and a trailing `/` matches directories only.
+  - `**` matches zero or more directories; a final `**` names everything below, files included. A trailing `/` matches directories only.
 
   A word that matches nothing stays as typed. The expansion goes through the filesystem's `list`, `isdir` and `exists`, not its own `glob`, so every filesystem expands the same way, including one that holds directories only implicitly. Brackets are now part of a word, so `a/[bc]*` is one word; `[ -f x ]` still parses as before.
-- **`ls` lists operands as GNU's does** (#28). File operands come first, by name and without headers. Then each directory follows, by name, under a `dir:` header when there's more than one operand, with blank lines between groups. A missing operand is reported on stderr while the rest are still listed, with exit status 2. A file operand used to get a `path:` header and its own path repeated under it, so `ls app/assets/*` listed every file twice.
+- **`ls` lists operands as GNU's does** (#28). File operands come first, without headers, ordered as entries are (by name, or by size or time under `-S` or `-t`, reversed under `-r`). Then each directory follows, by name, under a `dir:` header when there's more than one operand, with blank lines between groups. A missing operand is reported on stderr while the rest are still listed, with exit status 2. A file operand used to get a `path:` header and its own path repeated under it, so `ls app/assets/*` listed every file twice.
 
 ## [0.2.1] - 2026-10-03
 
