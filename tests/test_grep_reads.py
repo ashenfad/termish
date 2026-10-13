@@ -115,6 +115,21 @@ class TestBatched:
         assert fs.calls["read_many"] == 1
         assert fs.calls["read"] == 6  # each of the six entries, as without it
 
+    def test_keys_spelled_otherwise_fall_back_to_reading_each_file(self):
+        """A read_many that keys its answer by absolute path breaks the
+        contract; grep reads file by file rather than skip every file."""
+        fs = CountingFS()
+        fs.seed(TREE)
+        inner = fs._fs
+        fs._fs.read_many = lambda paths: {
+            inner._resolve(p): inner._files[inner._resolve(p)]
+            for p in paths
+            if inner.isfile(p)
+        }
+        output = run(fs, "grep -rl def src")
+        assert output == "src/a.py\nsrc/sub/c.py\n"
+        assert fs.calls["read"] == 6
+
 
 class TestFallback:
     def test_reads_each_file_and_asks_only_about_directories(self):

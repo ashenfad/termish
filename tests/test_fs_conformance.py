@@ -79,6 +79,17 @@ class TestReadMany:
         with pytest.raises(AssertionError, match="^read_many:"):
             check_filesystem(LooseFS())
 
+    def test_canonical_keys_fail(self):
+        """Keys must be the paths as given. One that resolves a relative
+        path to an absolute key would make grep -r skip every file."""
+
+        class CanonicalFS(MemoryFS):
+            def read_many(self, paths):
+                return {self._resolve(p): self.read(p) for p in paths if self.isfile(p)}
+
+        with pytest.raises(AssertionError, match="^read_many: relative paths"):
+            check_filesystem(CanonicalFS())
+
     def test_optional(self):
         """A filesystem without read_many still conforms."""
 

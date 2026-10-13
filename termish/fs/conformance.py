@@ -310,6 +310,19 @@ def _check_read_many(fs: Any, base: str) -> None:
         ),
         {one: b"1", two: b"22"},
     )
+
+    # Keys are the paths as given, not a canonical spelling of them: a
+    # caller looks its own paths up in the answer, so a relative path that
+    # came back absolute (or the reverse) would read as a missing file.
+    rel = posixpath.relpath(batch, fs.getcwd())
+    rel_one = posixpath.join(rel, "one.txt")
+    dot_two = "./" + posixpath.join(rel, "sub/two.txt")
+    _expect(
+        "read_many",
+        "relative paths are keyed exactly as given",
+        fs.read_many([rel_one, dot_two, one]),
+        {rel_one: b"1", dot_two: b"22", one: b"1"},
+    )
     _expect("read_many", "no paths, no files", fs.read_many([]), {})
 
 
