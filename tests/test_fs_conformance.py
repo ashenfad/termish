@@ -62,3 +62,27 @@ class TestCatchesABadBackend:
 
         with pytest.raises(TypeError):
             check_filesystem(LegacyFS())
+
+
+class TestReadMany:
+    def test_checked_when_present(self):
+        """A read_many that hands back a directory as a file must not pass."""
+
+        class LooseFS(MemoryFS):
+            def read_many(self, paths):
+                return {
+                    p: b"" if self.isdir(p) else self.read(p)
+                    for p in paths
+                    if self.exists(p)
+                }
+
+        with pytest.raises(AssertionError, match="^read_many:"):
+            check_filesystem(LooseFS())
+
+    def test_optional(self):
+        """A filesystem without read_many still conforms."""
+
+        class PlainFS(MemoryFS):
+            read_many = None
+
+        check_filesystem(PlainFS())

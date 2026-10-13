@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **An optional `read_many(paths) -> dict[str, bytes]` on a filesystem** (#32). It reads several whole files at once, each path as given to its bytes, and leaves out a path that is not a file (missing, or a directory) rather than raising. It is not part of the `FileSystem` protocol, so a filesystem without it still passes `isinstance`. `MemoryFS` has it, and `check_filesystem` checks it on a filesystem that has it. monkeyfs's `VirtualFS`, `IsolatedFS` and `MountFS` already offer it.
+
+### Changed
+- **`grep -r` reads a tree in batches, and no longer asks about each entry** (#32). It listed the tree, called `isdir` on every entry to drop the directories, then called `read` once per file: about 2N calls for N files, each a round trip on a filesystem that fetches remotely, such as a mount over a document store. Now, when the filesystem has `read_many`, the files are read 256 at a time, one call per batch, and a directory drops out because `read_many` leaves it out of its answer. A tree of 100 files in 10 directories takes 3 calls rather than 212. Without `read_many`, each entry is read and `isdir` is asked only of an entry whose read failed, which is a directory in the usual case. The batches keep a large tree from being held in memory all at once. Output, labels, filters and exit statuses are as before. One difference: with `read_many`, a listed file that is gone by the time it is read is skipped as a directory is, where it was an error.
+
 ## [0.2.2] - 2026-10-04
 
 ### Fixed

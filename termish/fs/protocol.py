@@ -54,6 +54,17 @@ class FileSystem(Protocol):
 
     Any object implementing these methods can be passed to termish's
     interpreter. No inheritance required — uses structural (duck) typing.
+
+    One method is optional, and is not part of the protocol, so a
+    filesystem without it still passes ``isinstance``:
+
+    ``read_many(paths: Iterable[str]) -> dict[str, bytes]``
+        Read several whole files at once: each path, as given, to its
+        bytes. A path that is not a file -- missing, or a directory -- is
+        left out rather than raised on. ``grep`` reads the files it
+        searches through it when it is there, so a filesystem that fetches
+        remotely answers a batch in one round trip rather than one per
+        file. `termish.fs.check_filesystem` checks it when it is there.
     """
 
     def getcwd(self) -> str:

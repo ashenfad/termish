@@ -72,7 +72,8 @@ def check_filesystem(fs: Any) -> None:
         fs: An empty filesystem instance to exercise. All sixteen protocol
             methods are called, including the ranged form of `read`, append
             mode on `write`, and the `FileInfo.path` convention on
-            `list_detailed`.
+            `list_detailed`. The optional `read_many` is checked when the
+            filesystem has it.
 
     Raises:
         AssertionError: On the first deviation, with a message naming the
@@ -95,6 +96,8 @@ def check_filesystem(fs: Any) -> None:
         _check_ranged_read(fs, base)
         _check_stat(fs, base)
         _check_listing(fs, base)
+        if callable(getattr(fs, "read_many", None)):
+            _check_read_many(fs, base)
         _check_glob(fs, base)
         _check_rename_and_remove(fs, base)
         _check_chdir(fs, root, base)
@@ -289,6 +292,25 @@ def _check_listing(fs: Any, base: str) -> None:
         "two.txt",
     )
     _expect("list_detailed", "size of a 2-byte file", nested.size, 2)
+
+
+def _check_read_many(fs: Any, base: str) -> None:
+    batch = posixpath.join(base, "batch")
+    fs.makedirs(posixpath.join(batch, "sub"))
+    one = posixpath.join(batch, "one.txt")
+    two = posixpath.join(batch, "sub/two.txt")
+    fs.write(one, b"1")
+    fs.write(two, b"22")
+
+    _expect(
+        "read_many",
+        "files map to their bytes; a directory and a missing path are left out",
+        fs.read_many(
+            [one, posixpath.join(batch, "sub"), two, posixpath.join(batch, "nope")]
+        ),
+        {one: b"1", two: b"22"},
+    )
+    _expect("read_many", "no paths, no files", fs.read_many([]), {})
 
 
 def _check_glob(fs: Any, base: str) -> None:
