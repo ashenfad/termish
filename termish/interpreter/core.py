@@ -235,21 +235,6 @@ def _transcript(output: io.BytesIO) -> str:
     return output.getvalue().decode("utf-8", errors="replace")
 
 
-def _flush_partial(cmd_stdout: PipeStream, stdout: io.BytesIO) -> None:
-    """Move a failing command's own stdout to the transcript.
-
-    A command writes into its private ``cmd_stdout``, which is normally
-    drained further down (pipe it onward, or write it out). Raising
-    jumps past that drain, so anything the command printed before it
-    failed would vanish — but a real shell still shows it. The case
-    that matters: an HTTP client writing an error BODY and then exiting
-    nonzero on the status. Losing the body loses the explanation.
-    """
-    data = cmd_stdout.getvalue()
-    if data:
-        stdout.write(data)
-
-
 def _execute_pipeline(
     pipeline: Pipeline,
     fs: FileSystem,
@@ -318,6 +303,46 @@ def _execute_pipeline(
             ),
             None,
         )
+        output_redirects = [r for r in cmd_node.redirects if r.type in (">", ">>")]
+
+        def write_redirects(data: bytes) -> None:
+            """Write ``data`` to each of the command's output redirects."""
+            for r in output_redirects:
+                target = _expand_word(r.target, env, last_exit_code)
+                if _is_dev_null(target, fs):
+                    # Discarded, as stderr's 2>/dev/null already was.
+                    # Written as a file it lands in the filesystem as
+                    # /dev/null, where every later listing and diff of
+                    # the tree finds it.
+                    continue
+                path = resolve_path(target, fs)
+                try:
+                    _write_to_file(path, data, r.type == ">>", fs)
+                except Exception as e:
+                    raise TerminalError(f"{cmd_name}: redirect failed: {e}")
+
+        def drain_partial() -> None:
+            """Send a failing command's own stdout where it was sent.
+
+            A command writes into its private ``cmd_stdout``, which is
+            normally drained further down (pipe it onward, or write it
+            out). Raising jumps past that drain, so anything the command
+            printed before it failed would vanish -- but a real shell
+            still delivers it: an HTTP client's error body, written
+            before it exits nonzero on the status, explains the failure.
+            With an output redirect it goes there, as in bash (``cat a
+            missing > out`` writes a's content to ``out``); without one,
+            to the transcript. The failure stays the outcome even if the
+            redirect cannot be written.
+            """
+            data = cmd_stdout.getvalue()
+            if not output_redirects:
+                stdout.write(data)
+                return
+            try:
+                write_redirects(data)
+            except TerminalError:
+                pass
 
         # Execute Command — injected commands override built-ins
         failure: TerminalError | None = None
@@ -350,13 +375,13 @@ def _execute_pipeline(
                 )
         except TerminalError as e:
             if stderr_redirect is None:
-                _flush_partial(cmd_stdout, stdout)
+                drain_partial()
                 raise
             failure = e
         except Exception as e:
             wrapped = TerminalError(f"{cmd_name}: execution error: {e}")
             if stderr_redirect is None:
-                _flush_partial(cmd_stdout, stdout)
+                drain_partial()
                 raise wrapped
             failure = wrapped
 
@@ -405,7 +430,7 @@ def _execute_pipeline(
         # the merged text (the agent idiom ``cmd 2>&1 | head``); if it's
         # the final stage, the failure resurfaces after the loop.
         if failure is not None and stderr_redirect.type != "2>&1":
-            _flush_partial(cmd_stdout, stdout)
+            drain_partial()
             raise TerminalError(failure.message, exit_code=failure.exit_code, stderr="")
         merged_failure = failure  # only ever non-None for "2>&1"
 
@@ -413,22 +438,8 @@ def _execute_pipeline(
         output_bytes = cmd_stdout.getvalue()
 
         # Handle Output Redirects
-        output_redirects = [r for r in cmd_node.redirects if r.type in (">", ">>")]
-
         if output_redirects:
-            for r in output_redirects:
-                target = _expand_word(r.target, env, last_exit_code)
-                if _is_dev_null(target, fs):
-                    # Discarded, as stderr's 2>/dev/null already was.
-                    # Written as a file it lands in the filesystem as
-                    # /dev/null, where every later listing and diff of
-                    # the tree finds it.
-                    continue
-                path = resolve_path(target, fs)
-                try:
-                    _write_to_file(path, output_bytes, r.type == ">>", fs)
-                except Exception as e:
-                    raise TerminalError(f"{cmd_name}: redirect failed: {e}")
+            write_redirects(output_bytes)
             current_input = b""
         else:
             current_input = output_bytes

@@ -128,6 +128,12 @@ class TestInvalidNumber:
         out = execute(rf"printf '%d\n' {operand}; echo exit=$?", fs)
         assert out == f"0\nprintf: {operand}: invalid number\nexit=1\n"
 
+    def test_the_substituted_zero_follows_a_redirect(self, fs):
+        # bash writes the 0 to the file; only the diagnostic is shown
+        out = execute(r"printf '%d\n' abc > /f; true", fs)
+        assert out == "printf: abc: invalid number\n"
+        assert fs.read("/f") == b"0\n"
+
     def test_leading_zero_octal_still_converts(self, fs):
         assert execute(r"printf '%d %d' 010 -010", fs) == "8 -8"
 
