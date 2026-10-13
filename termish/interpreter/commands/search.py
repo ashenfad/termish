@@ -56,16 +56,24 @@ def _read_files(
     not a file is skipped: a directory, which the listing does not mark,
     or a file gone since. A path named on the command line that cannot be
     read is read again on its own, so its error is the one ``read`` gives.
+    A batch that fails, or answers with keys it was not asked for, is
+    read file by file instead.
     """
     read_many = getattr(fs, "read_many", None)
     for start in range(0, len(targets), _READ_BATCH):
         chunk = targets[start : start + _READ_BATCH]
         found: dict[str, bytes] | None = None
         if read_many is not None:
+            asked = [path for path, _ in chunk]
             try:
-                found = read_many([path for path, _ in chunk])
+                found = read_many(asked)
             except Exception:
                 found = None  # file by file, so each error names its own path
+            if found is not None and not found.keys() <= set(asked):
+                # Keys must be the paths as given. One spelled otherwise
+                # (made absolute, say) would leave every listed file
+                # looking like a directory, so the answer is not used.
+                found = None
         for path, from_listing in chunk:
             if found is not None:
                 if path in found:
