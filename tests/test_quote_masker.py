@@ -56,3 +56,16 @@ def test_unmask_and_unquote():
     result = unmask_and_unquote(token, mapping)
 
     assert result == "pattern"
+
+
+def test_quote_after_an_even_run_of_backslashes():
+    # the backslashes escape each other, so the quote still opens
+    masked, mapping = mask_quotes("a\\\\'b c'")
+    assert list(mapping.values()) == ["'b c'"]
+    assert masked == "a\\\\" + next(iter(mapping))
+
+
+def test_quote_after_an_odd_run_of_backslashes():
+    masked, mapping = mask_quotes("a\\\\\\'b c")
+    assert mapping == {}
+    assert masked == "a\\\\\\'b c"
