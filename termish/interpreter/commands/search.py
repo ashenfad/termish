@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import fnmatch
 import io
+import itertools
 import re
 from typing import TYPE_CHECKING, TextIO
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
 
 from termish.context import CommandContext, CommandResult, PipeStream
 from termish.errors import TerminalError
@@ -17,23 +18,78 @@ from termish.fs import FileSystem
 from ._argparse import CommandArgParser
 from ._regex import bre_to_python
 
+# How many files grep reads in one batch: enough that a filesystem that
+# fetches remotely answers a typical tree in a round trip or two, few
+# enough that a large tree is never all in memory at once.
+_READ_BATCH = 256
 
-def _collect_files(user_dir: str, out: list[str], fs: FileSystem) -> None:
-    """Recursively collect file paths under *user_dir*, preserving the user's prefix.
+
+def _collect_files(user_dir: str, out: list[tuple[str, bool]], fs: FileSystem) -> None:
+    """Add every entry under *user_dir* to *out*, preserving the user's prefix.
+
+    Each entry is paired with True: it came from a listing, so it may be a
+    directory. Telling which took an ``isdir`` call per entry, a round trip
+    each on a remote filesystem; ``_read_files`` sorts them out instead.
 
     Uses ``fs.list()`` (which returns paths relative to the queried directory)
-    rather than ``list_detailed()`` whose ``.path`` format varies across FS
-    implementations.
+    rather than ``list_detailed()``, whose ``.path`` format varies across FS
+    implementations and which can cost a ``stat`` per entry behind a mount.
     """
     prefix = user_dir.rstrip("/")
     try:
         entries = fs.list(user_dir, recursive=True)
     except Exception as e:
         raise TerminalError(f"grep: {user_dir}: {e}")
-    for entry in entries:
-        full = f"{prefix}/{entry}"
-        if not fs.isdir(full):
-            out.append(full)
+    out.extend((f"{prefix}/{entry}", True) for entry in entries)
+
+
+def _read_files(
+    fs: FileSystem, targets: list[tuple[str, bool]]
+) -> Iterator[tuple[str, bytes | Exception]]:
+    """Yield each file in *targets* with its bytes, in order, or the
+    exception reading it raised.
+
+    Files are read ``_READ_BATCH`` at a time with ``fs.read_many`` when the
+    filesystem has it, so a remote one answers each batch in a single
+    round trip; otherwise with one ``read`` per file. A target is a path
+    and whether it came from listing a directory. A listed path that is
+    not a file is skipped: a directory, which the listing does not mark,
+    or a file gone since. A path named on the command line that cannot be
+    read is read again on its own, so its error is the one ``read`` gives.
+    """
+    read_many = getattr(fs, "read_many", None)
+    for start in range(0, len(targets), _READ_BATCH):
+        chunk = targets[start : start + _READ_BATCH]
+        found: dict[str, bytes] | None = None
+        if read_many is not None:
+            try:
+                found = read_many([path for path, _ in chunk])
+            except Exception:
+                found = None  # file by file, so each error names its own path
+        for path, from_listing in chunk:
+            if found is not None:
+                if path in found:
+                    yield path, found[path]
+                    continue
+                if from_listing:
+                    continue  # read_many leaves out what is not a file
+            try:
+                content = fs.read(path)
+            except Exception as e:
+                # A directory read may raise anything (FileNotFoundError on
+                # some filesystems), so only a failed read asks what it was.
+                if from_listing and _isdir(fs, path):
+                    continue
+                yield path, e
+            else:
+                yield path, content
+
+
+def _isdir(fs: FileSystem, path: str) -> bool:
+    try:
+        return fs.isdir(path)
+    except Exception:
+        return False
 
 
 def grep(ctx: CommandContext) -> CommandResult | None:
@@ -255,7 +311,9 @@ def grep(ctx: CommandContext) -> CommandResult | None:
         process_content(content, None)
         return _matched(matches_total > 0)
 
-    files_to_search = []
+    # Each path is paired with whether it came from listing a directory
+    # (see _read_files): such an entry may be a directory itself.
+    files_to_search: list[tuple[str, bool]] = []
 
     if not parsed.files:
         if parsed.recursive:
@@ -266,36 +324,46 @@ def grep(ctx: CommandContext) -> CommandResult | None:
                 # Auto-recurse into directories (matches modern grep behaviour)
                 _collect_files(path, files_to_search, fs)
             else:
-                files_to_search.append(path)
+                files_to_search.append((path, False))
 
     # Apply --include/--exclude/--exclude-dir filters
     if parsed.include:
         files_to_search = [
-            f
-            for f in files_to_search
+            (f, from_listing)
+            for f, from_listing in files_to_search
             if fnmatch.fnmatch(f.split("/")[-1], parsed.include)
         ]
     if parsed.exclude:
         files_to_search = [
-            f
-            for f in files_to_search
+            (f, from_listing)
+            for f, from_listing in files_to_search
             if not fnmatch.fnmatch(f.split("/")[-1], parsed.exclude)
         ]
     if parsed.exclude_dir:
         files_to_search = [
-            f
-            for f in files_to_search
+            (f, from_listing)
+            for f, from_listing in files_to_search
             if not any(
                 fnmatch.fnmatch(part, parsed.exclude_dir) for part in f.split("/")[:-1]
             )
         ]
 
-    multiple_files = len(files_to_search) > 1 or parsed.recursive
+    reads = _read_files(fs, files_to_search)
+    if parsed.recursive or not any(from_listing for _, from_listing in files_to_search):
+        multiple_files = len(files_to_search) > 1 or parsed.recursive
+    else:
+        # A directory operand without -r: lines are labeled when there is
+        # more than one file, and the listing does not say which entries
+        # are files, so look two files ahead before printing any.
+        ahead = list(itertools.islice(reads, 2))
+        multiple_files = len(ahead) > 1
+        reads = itertools.chain(ahead, reads)
     listed = False  # a file -L printed
 
-    for filepath in files_to_search:
+    for filepath, content_bytes in reads:
         try:
-            content_bytes = fs.read(filepath)
+            if isinstance(content_bytes, Exception):
+                raise content_bytes
             content = content_bytes.decode("utf-8", errors="replace")
 
             # Determine label (filename prefix) for output lines

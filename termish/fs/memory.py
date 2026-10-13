@@ -9,6 +9,7 @@ from __future__ import annotations
 import errno as _errno
 import fnmatch
 import posixpath
+from collections.abc import Iterable
 from datetime import datetime, timezone
 
 from .protocol import FileInfo, FileMetadata
@@ -87,6 +88,18 @@ class MemoryFS:
         if size < 0:
             return content[offset:]
         return content[offset : offset + size]
+
+    def read_many(self, paths: Iterable[str]) -> dict[str, bytes]:
+        """Read several whole files: each path, as given, to its bytes.
+
+        A path that is not a file -- missing, or a directory -- is left out.
+        """
+        found: dict[str, bytes] = {}
+        for path in paths:
+            resolved = self._resolve(path)
+            if resolved in self._files:
+                found[path] = self._files[resolved]
+        return found
 
     def write(self, path: str, content: bytes, mode: str = "w") -> None:
         path = self._resolve(path)
