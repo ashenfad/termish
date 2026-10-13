@@ -307,6 +307,34 @@ class TestFindExec:
         )
         assert out.split() == ["warning", "1"]
 
+    @pytest.mark.parametrize("form", ["';'", "'+'"])
+    def test_exec_shows_a_warning_as_written(self, fs, form):
+        """Blank lines in a warning survive find, as they do when the
+        command runs directly."""
+        fs.write("/a.txt", b"")
+
+        def warn(ctx: CommandContext) -> CommandResult:
+            ctx.stdout.write("output\n")
+            return CommandResult(stderr="first\n\n")
+
+        commands = {"warn": warn}
+        out = execute(f"find / -type f -exec warn '{{}}' {form}", fs, commands=commands)
+        assert out == execute("warn /a.txt", fs, commands=commands)
+        assert out == "first\n\noutput\n"
+
+    def test_exec_shows_a_failing_commands_diagnostic_as_written(self, fs):
+        fs.write("/a.txt", b"")
+
+        def fail(ctx: CommandContext) -> CommandResult:
+            return CommandResult(exit_code=3, stderr="fail: broke\n\n")
+
+        out = execute(
+            "find / -type f -exec fail '{}' ';'; echo st=$?",
+            fs,
+            commands={"fail": fail},
+        )
+        assert out == "fail: broke\n\nst=0\n"
+
     def test_exec_reports_a_failing_command(self, fs):
         """Its diagnostic is shown; a failed ';' command makes its test
         false, and a failed '+' batch makes find exit 1, as in GNU find."""
