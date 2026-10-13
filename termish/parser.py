@@ -191,6 +191,39 @@ def _handle_line_continuation(text: str) -> str:
     return re.sub(r"\\\n[ \t]*", " ", text)
 
 
+def _keep_escapes(text: str) -> str:
+    r"""Protect the backslash of an unquoted ``\$`` or ``\\`` from shlex.
+
+    shlex (posix) drops the backslash of every escape, but expansion
+    runs after tokenizing and needs it to tell ``\$NAME`` (a literal
+    ``$NAME``) from ``$NAME``, and ``\\$NAME`` (a backslash, then an
+    expansion) from ``\$NAME``. Doubling those two escapes makes shlex
+    hand the original pair through, and expansion resolves it, as it
+    already does inside double quotes. Every other escape is left for
+    shlex to resolve. ``text`` is quote-masked, so every backslash in it
+    is unquoted.
+    """
+    if "\\" not in text:
+        return text
+    out: list[str] = []
+    i = 0
+    while i < len(text):
+        c = text[i]
+        if c == "\\" and i + 1 < len(text):
+            nxt = text[i + 1]
+            if nxt in "$\\":
+                # an escaped backslash, then the escape itself: shlex
+                # reads the two back as the original backslash and nxt
+                out.append("\\\\" + "\\" + nxt)
+            else:
+                out.append(c + nxt)
+            i += 2
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
 def to_script(text: str) -> Script:
     """
     Parse a command string into a Script AST node.
@@ -230,7 +263,7 @@ def to_script(text: str) -> Script:
 
     # Configure shlex to handle shell punctuation as separate tokens
     # punctuation_chars=True ensures "ls|grep" becomes ["ls", "|", "grep"]
-    lexer = shlex.shlex(masked_text, posix=True, punctuation_chars=True)
+    lexer = shlex.shlex(_keep_escapes(masked_text), posix=True, punctuation_chars=True)
 
     # shlex with punctuation_chars=True has a narrow wordchars set that
     # excludes several characters which are NOT shell operators and should

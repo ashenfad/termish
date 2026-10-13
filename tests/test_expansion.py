@@ -162,6 +162,35 @@ class TestVarExpansion:
         assert env == {"FOO": "bar"}
 
 
+class TestUnquotedBackslash:
+    """Outside quotes a backslash escapes the next character, `$` included
+    (#31): the tokenizer used to drop it before expansion could see it."""
+
+    ENV = {"NAME": "alice"}
+
+    def test_escaped_dollar_is_literal(self, fs):
+        assert execute("echo \\$NAME", fs, env=self.ENV) == "$NAME\n"
+        assert execute("echo \\${NAME}", fs, env=self.ENV) == "${NAME}\n"
+        assert execute("false; echo \\$?", fs) == "$?\n"
+
+    def test_escaped_backslash_before_an_expansion(self, fs):
+        assert execute("echo \\\\$NAME", fs, env=self.ENV) == "\\alice\n"
+        assert execute("echo \\\\\\$NAME", fs, env=self.ENV) == "\\$NAME\n"
+
+    def test_other_escapes_still_resolve(self, fs):
+        assert execute("echo a\\ b", fs) == "a b\n"
+        assert execute("echo a\\\\b", fs) == "a\\b\n"
+        assert execute("echo a\\\\\\\\b", fs) == "a\\\\b\n"
+
+    def test_mixed_with_quotes(self, fs):
+        out = execute('echo "\\$NAME" \\$NAME"x" $NAME', fs, env=self.ENV)
+        assert out == "$NAME $NAMEx alice\n"
+
+    def test_in_a_redirect_target(self, fs):
+        execute("echo hi > \\$NAME", fs, env=self.ENV)
+        assert fs.read("/$NAME") == b"hi\n"
+
+
 class TestNonExpansion:
     """Forms with '$' that must stay literal."""
 
