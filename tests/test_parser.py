@@ -557,3 +557,47 @@ def test_a_conditional_points_at_test_and_the_operators():
         "if: control flow is not supported; "
         "test with [ ... ] and branch with && and || instead"
     )
+
+
+# Comments: a '#' that starts a word, as in bash (#31)
+
+
+def test_comment_may_mention_command_substitution():
+    fs = MemoryFS()
+    assert execute("echo hi # $(pwd)", fs) == "hi\n"
+    assert execute('# "$(pwd)"\necho next', fs) == "next\n"
+
+
+def test_comment_starts_after_an_operator():
+    assert execute("echo hi;# note\necho next", MemoryFS()) == "hi\nnext\n"
+
+
+@pytest.mark.parametrize(
+    "script, out",
+    [
+        ("echo a#b", "a#b\n"),
+        ("echo http://host/page#frag", "http://host/page#frag\n"),
+        ('echo "a"#b', "a#b\n"),
+        ("echo \\#x y", "#x y\n"),
+        ("echo $#", "$#\n"),
+    ],
+)
+def test_hash_inside_a_word_is_literal(script, out):
+    assert execute(script, MemoryFS()) == out
+
+
+def test_quotes_in_a_comment_are_inert():
+    # the apostrophe used to pair with the quote on the next line
+    assert execute("echo a # don't\necho 'b'", MemoryFS()) == "a\nb\n"
+
+
+def test_escaped_command_substitution_is_literal():
+    assert execute('echo "\\$(pwd)"', MemoryFS()) == "$(pwd)\n"
+    # unquoted, it is not refused; termish splits ( and ) off as words
+    assert execute("echo \\$(pwd)", MemoryFS()) == "$ ( pwd )\n"
+
+
+@pytest.mark.parametrize("script", ['echo "\\\\$(pwd)"', "echo \\\\$(pwd)"])
+def test_escaped_backslash_leaves_command_substitution_live(script):
+    with pytest.raises(ParseError, match="Command substitution"):
+        to_script(script)
