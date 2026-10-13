@@ -346,6 +346,9 @@ def mv(ctx: CommandContext) -> CommandResult | None:
         raise TerminalError("mv: too many arguments")
 
     src, dst = parsed.paths
+    if fs.isdir(dst):
+        # an existing directory receives src under its own name
+        dst = posixpath.join(dst, posixpath.basename(src.rstrip("/")))
     if parsed.no_clobber and fs.exists(dst):
         return  # silently skip
 

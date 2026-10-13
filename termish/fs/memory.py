@@ -41,11 +41,27 @@ class MemoryFS:
             path = self._cwd.rstrip("/") + "/" + path
         return posixpath.normpath(path)
 
+    def _refuse_a_file_on_the_way(self, path: str) -> None:
+        """Raise NotADirectoryError (ENOTDIR) if a component of *path* is
+        a file: a path below one can't be created without leaving the file
+        a directory as well."""
+        current = ""
+        for part in path.strip("/").split("/"):
+            current += "/" + part
+            if current in self._files:
+                raise NotADirectoryError(_errno.ENOTDIR, "Not a directory", current)
+
     def _ensure_parent(self, path: str) -> None:
-        """Raise if the parent directory of *path* does not exist."""
+        """Raise unless the parent directory of *path* exists.
+
+        NotADirectoryError (ENOTDIR) when a file is in the way, and
+        FileNotFoundError (ENOENT) when a directory on the way is missing.
+        """
         parent = posixpath.dirname(path)
-        if parent != path and parent not in self._dirs:
-            raise FileNotFoundError(_errno.ENOENT, "No such directory", parent)
+        if parent == path or parent in self._dirs:
+            return
+        self._refuse_a_file_on_the_way(parent)
+        raise FileNotFoundError(_errno.ENOENT, "No such directory", parent)
 
     def _touch_ts(self, path: str) -> None:
         """Update modified_at; set created_at if new."""
@@ -102,9 +118,15 @@ class MemoryFS:
         return found
 
     def write(self, path: str, content: bytes, mode: str = "w") -> None:
+        """Write *content* to the file at *path*, creating any missing
+        directories on the way; a file on the way raises
+        NotADirectoryError, and a directory at *path* IsADirectoryError."""
         path = self._resolve(path)
+        if path in self._dirs:
+            raise IsADirectoryError(_errno.EISDIR, "Is a directory", path)
         parent = posixpath.dirname(path)
         if parent != path and parent not in self._dirs:
+            self._refuse_a_file_on_the_way(parent)
             self.makedirs(parent, exist_ok=True)
         if mode == "a" and path in self._files:
             self._files[path] = self._files[path] + content
@@ -165,6 +187,9 @@ class MemoryFS:
         path = self._resolve(path)
         if not exist_ok and path in self._dirs:
             raise FileExistsError(f"Directory exists: '{path}'")
+        if path in self._files:
+            raise FileExistsError(f"Path exists as file: '{path}'")
+        self._refuse_a_file_on_the_way(path)
         parts = path.strip("/").split("/")
         current = ""
         for part in parts:
@@ -200,9 +225,16 @@ class MemoryFS:
         self._timestamps.pop(path, None)
 
     def rename(self, src: str, dst: str) -> None:
+        """Move *src* to *dst*, as rename(2) does: a file never replaces a
+        directory nor a directory a file, a directory replaces only an
+        empty one, and never moves into itself."""
         src = self._resolve(src)
         dst = self._resolve(dst)
+        if src == dst and self.exists(src):
+            return
         if src in self._files:
+            if dst in self._dirs:
+                raise IsADirectoryError(_errno.EISDIR, "Is a directory", dst)
             self._ensure_parent(dst)
             self._files[dst] = self._files.pop(src)
             ts = self._timestamps.pop(src, None)
@@ -210,6 +242,13 @@ class MemoryFS:
                 self._timestamps[dst] = ts
         elif src in self._dirs:
             src_prefix = src.rstrip("/") + "/"
+            if dst in self._files:
+                raise NotADirectoryError(_errno.ENOTDIR, "Not a directory", dst)
+            if dst.startswith(src_prefix):
+                raise OSError(_errno.EINVAL, "Cannot move a directory into itself", dst)
+            if dst in self._dirs and self.list(dst):
+                raise OSError(_errno.ENOTEMPTY, "Directory not empty", dst)
+            self._ensure_parent(dst)
             self._dirs.discard(src)
             self._dirs.add(dst)
             # Move timestamp

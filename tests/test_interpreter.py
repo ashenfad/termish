@@ -1,5 +1,6 @@
 import pytest
 
+from termish import execute
 from termish.errors import TerminalError
 from termish.fs import MemoryFS
 from termish.interpreter import execute_script
@@ -580,7 +581,49 @@ class TestMvFlags:
         assert fs.read("/b.txt") == b"existing"
         assert fs.exists("/a.txt")
 
+    def test_mv_into_a_directory(self, fs):
+        """An existing directory receives the source under its own name,
+        rather than becoming a file as well (#31)."""
+        fs.write("/a.txt", b"hello")
+        fs.makedirs("/s")
+        fs.write("/s/x", b"")
+        fs.makedirs("/d")
+        execute("mv a.txt d; mv s d", fs)
+        assert fs.read("/d/a.txt") == b"hello"
+        assert fs.exists("/d/s/x")
+        assert not fs.isfile("/d")
+
+    def test_mv_no_clobber_into_a_directory(self, fs):
+        fs.write("/a.txt", b"new")
+        fs.makedirs("/d")
+        fs.write("/d/a.txt", b"old")
+        execute("mv -n a.txt d", fs)
+        assert fs.read("/d/a.txt") == b"old"
+
     def test_mv_unknown_option(self, fs):
         fs.write("/a.txt", b"")
         with pytest.raises(TerminalError, match="unknown option"):
             execute_script(to_script("mv --unknown a.txt b.txt"), fs)
+
+
+class TestNothingBelowAFile:
+    """Builtins report a file in the way instead of making it a directory
+    too (#31)."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "echo y > /f/child",
+            "touch /f/child",
+            "mkdir /f/sub",
+            "mkdir -p /f/a/b",
+            "cp /g /f/child",
+            "mv /g /f/child",
+        ],
+    )
+    def test_reports_not_a_directory(self, fs, command):
+        fs.write("/f", b"x")
+        fs.write("/g", b"g")
+        with pytest.raises(TerminalError, match="Not a directory"):
+            execute(command, fs)
+        assert fs.isfile("/f") and not fs.isdir("/f")
