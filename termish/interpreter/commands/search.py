@@ -11,11 +11,12 @@ from typing import TYPE_CHECKING, TextIO
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
-from termish.context import CommandContext, CommandResult, PipeStream
+from termish.context import CommandContext, CommandResult
 from termish.errors import TerminalError
 from termish.fs import FileSystem
 
 from ._argparse import CommandArgParser
+from ._dispatch import dispatch_argv, stderr_of
 from ._regex import bre_to_python
 
 # How many files grep reads in one batch: enough that a filesystem that
@@ -633,10 +634,11 @@ class _ExecBatchPred(_FindPred):
         self.collected.append(item.path)
         return True
 
-    def finalize(self, fs: FileSystem) -> None:
-        """Run the batched command with all collected paths."""
+    def finalize(self, fs: FileSystem) -> bool:
+        """Run the batched command with all collected paths; whether it
+        succeeded."""
         if not self.collected:
-            return
+            return True
         # Replace {} with the collected paths
         expanded: list[str] = []
         for tok in self.cmd_tokens:
@@ -649,7 +651,8 @@ class _ExecBatchPred(_FindPred):
             if output:
                 _emit_bytes(self.stdout, output)
         except Exception:
-            pass
+            return False
+        return True
 
 
 class _AndPred(_FindPred):
@@ -855,15 +858,18 @@ def _parse_find_predicates(
     return result
 
 
-def _finalize_batch(pred: _FindPred, fs: FileSystem) -> None:
-    """Walk the predicate tree and finalize any batch -exec + predicates."""
+def _finalize_batch(pred: _FindPred, fs: FileSystem) -> bool:
+    """Walk the predicate tree and finalize any batch -exec + predicates;
+    whether every batch succeeded."""
     if isinstance(pred, _ExecBatchPred):
-        pred.finalize(fs)
-    elif isinstance(pred, (_AndPred, _OrPred)):
-        _finalize_batch(pred.left, fs)
-        _finalize_batch(pred.right, fs)
-    elif isinstance(pred, _NotPred):
-        _finalize_batch(pred.child, fs)
+        return pred.finalize(fs)
+    if isinstance(pred, (_AndPred, _OrPred)):
+        left = _finalize_batch(pred.left, fs)
+        right = _finalize_batch(pred.right, fs)
+        return left and right
+    if isinstance(pred, _NotPred):
+        return _finalize_batch(pred.child, fs)
+    return True
 
 
 def find(ctx: CommandContext) -> CommandResult | None:
@@ -906,51 +912,25 @@ def find(ctx: CommandContext) -> CommandResult | None:
             predicate_tokens.append(args[i])
             i += 1
 
-    # Build executor for -exec predicates (deferred import to avoid circular dep)
+    # What -exec commands say on stderr is find's own stderr, shown and
+    # never fed down the pipe: the warnings of commands that succeed and
+    # the diagnostics of those that fail.
+    exec_stderr: list[str] = []
+
     def _executor(argv: list[str], executor_fs: FileSystem) -> bytes:
         """Dispatch an already-tokenized command without shell reparsing.
 
-        Returns the sub-command's stdout as bytes, with its stderr (text)
-        encoded ahead of it, so a binary payload survives the trip through
-        find unchanged.
+        Returns the sub-command's stdout as bytes, so a binary payload
+        survives the trip through find unchanged.
         """
-        from termish.interpreter.core import _resolve_command
-
-        cmd_name, *cmd_args = argv
-        cmd_func = _resolve_command(cmd_name)
-        if cmd_func is None:
-            raise TerminalError(f"{cmd_name}: command not found", exit_code=127)
-
-        cmd_stdout = PipeStream()
         try:
-            result = cmd_func(
-                CommandContext(
-                    args=cmd_args,
-                    stdin=PipeStream(),
-                    stdout=cmd_stdout,
-                    fs=executor_fs,
-                    env=ctx.env,
-                )
-            )
-            if result is not None and result.exit_code != 0:
-                raise TerminalError(
-                    f"{cmd_name}: {result.stderr}"
-                    if result.stderr
-                    else f"{cmd_name}: exited with code {result.exit_code}",
-                    exit_code=result.exit_code,
-                    stderr=result.stderr,
-                )
-        except TerminalError:
+            output, warning = dispatch_argv(argv, executor_fs, ctx.env)
+        except TerminalError as e:
+            if text := stderr_of(e):
+                exec_stderr.append(text)
             raise
-        except Exception as e:
-            raise TerminalError(f"{cmd_name}: execution error: {e}")
-
-        output = cmd_stdout.getvalue()
-        if result is not None and result.stderr:
-            diagnostic = (
-                result.stderr if result.stderr.endswith("\n") else result.stderr + "\n"
-            )
-            return diagnostic.encode("utf-8") + output
+        if warning:
+            exec_stderr.append(warning.rstrip("\n"))
         return output
 
     predicate = _parse_find_predicates(
@@ -991,5 +971,11 @@ def find(ctx: CommandContext) -> CommandResult | None:
         if not has_action:
             stdout.write(f"{item.path}\n")
 
-    # Finalize any batch -exec + predicates
-    _finalize_batch(predicate, fs)
+    # Finalize any batch -exec + predicates. A failed '+' batch makes find
+    # exit 1, as GNU's does; a failed ';' command only makes its test false.
+    batches_ok = _finalize_batch(predicate, fs)
+    if exec_stderr or not batches_ok:
+        return CommandResult(
+            exit_code=0 if batches_ok else 1, stderr="\n".join(exec_stderr)
+        )
+    return None

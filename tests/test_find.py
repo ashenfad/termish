@@ -1,5 +1,6 @@
 import pytest
 
+from termish import execute
 from termish.context import CommandContext, CommandResult
 from termish.errors import TerminalError
 from termish.fs import MemoryFS
@@ -286,6 +287,45 @@ class TestFindExec:
         )
 
         assert out == "warning\noutput\n"
+
+    def test_exec_warning_never_goes_down_the_pipe(self, fs):
+        # find's own stderr, as xargs's is (#31)
+        fs.write("/a.txt", b"")
+        fs.write("/b.txt", b"")
+
+        def warn(ctx: CommandContext) -> CommandResult:
+            ctx.stdout.write("output\n")
+            return CommandResult(stderr="warning")
+
+        commands = {"warn": warn}
+        out = execute(
+            "find / -type f -exec warn '{}' ';' | wc -l", fs, commands=commands
+        )
+        assert out.split() == ["warning", "warning", "2"]
+        out = execute(
+            "find / -type f -exec warn '{}' '+' | wc -l", fs, commands=commands
+        )
+        assert out.split() == ["warning", "1"]
+
+    def test_exec_reports_a_failing_command(self, fs):
+        """Its diagnostic is shown; a failed ';' command makes its test
+        false, and a failed '+' batch makes find exit 1, as in GNU find."""
+        fs.write("/a.txt", b"")
+
+        def fail(ctx: CommandContext) -> CommandResult:
+            return CommandResult(exit_code=3, stderr="fail: broke")
+
+        commands = {"fail": fail}
+        out = execute(
+            "find / -type f -exec fail '{}' ';' -o -print; echo st=$?",
+            fs,
+            commands=commands,
+        )
+        assert out == "fail: broke\n/a.txt\nst=0\n"
+        out = execute(
+            "find / -type f -exec fail '{}' '+'; echo st=$?", fs, commands=commands
+        )
+        assert out == "fail: broke\nst=1\n"
 
     def test_exec_passes_metacharacter_paths_as_single_arguments(self, fs):
         paths = [

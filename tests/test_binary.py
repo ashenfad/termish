@@ -98,7 +98,7 @@ class TestRedirectsCarryBytes:
         execute("find d -type f -exec cat '{}' ';' | cat > copy.dat", fs)
         assert fs.read("/copy.dat") == ALL_BYTES
 
-    def test_find_exec_stderr_stays_ahead_of_bytes(self, fs):
+    def test_find_exec_stderr_stays_out_of_the_bytes(self, fs):
         fs.makedirs("/d")
         fs.write("/d/one.dat", ALL_BYTES)
 
@@ -106,12 +106,13 @@ class TestRedirectsCarryBytes:
             ctx.stdout.buffer.write(ALL_BYTES)
             return CommandResult(exit_code=0, stderr="careful")
 
-        execute(
+        out = execute(
             "find d -type f -exec warn_and_emit '{}' ';' > out.dat",
             fs,
             commands={"warn_and_emit": warn_and_emit},
         )
-        assert fs.read("/out.dat") == b"careful\n" + ALL_BYTES
+        assert out == "careful\n"
+        assert fs.read("/out.dat") == ALL_BYTES
 
     def test_heredoc_body_is_utf8(self, fs):
         execute("cat <<EOF > out.txt\ncafé\nEOF", fs)

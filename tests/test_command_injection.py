@@ -259,6 +259,38 @@ class TestXargsWithInjection:
         assert ">> b" in output
         assert ">> c" in output
 
+    def test_xargs_shows_a_commands_warning(self, fs):
+        """A warning shows under xargs as it does when the command runs
+        directly, and never goes down the pipe (#31)."""
+
+        def warn(ctx: CommandContext) -> CommandResult | None:
+            ctx.stdout.write("out\n")
+            return CommandResult(stderr="warning")
+
+        commands = {"warn": warn}
+        assert execute("echo x | xargs warn", fs, commands=commands) == (
+            "warning\nout\n"
+        )
+        assert execute("echo x | xargs warn | wc -l", fs, commands=commands) == (
+            "warning\n1\n"
+        )
+        assert execute("echo a b | xargs -n 1 warn", fs, commands=commands) == (
+            "warning\nwarning\nout\nout\n"
+        )
+
+    def test_xargs_keeps_earlier_warnings_when_a_later_run_fails(self, fs):
+        def picky(ctx: CommandContext) -> CommandResult | None:
+            if ctx.args == ["bad"]:
+                return CommandResult(exit_code=2, stderr="picky: bad input")
+            return CommandResult(stderr=f"picky: {ctx.args[0]} looks odd")
+
+        out = execute(
+            "echo ok bad | xargs -n 1 picky; echo st=$?",
+            fs,
+            commands={"picky": picky},
+        )
+        assert out == "picky: ok looks odd\npicky: bad input\nst=2\n"
+
 
 # =============================================================================
 # execute_script with commands parameter
