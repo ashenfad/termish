@@ -5,8 +5,10 @@ Meta commands that invoke other commands.
 import contextvars
 from typing import TYPE_CHECKING
 
-from termish.context import CommandContext, CommandResult, PipeStream
+from termish.context import CommandContext, CommandResult
 from termish.errors import TerminalError
+
+from ._dispatch import dispatch_argv, stderr_of
 
 _MAX_XARGS_DEPTH = 16
 _xargs_depth: contextvars.ContextVar[int] = contextvars.ContextVar(
@@ -102,52 +104,51 @@ def xargs(ctx: CommandContext) -> CommandResult | None:
     if not items:
         return
 
+    # What the commands say on stderr while succeeding becomes xargs's own
+    # stderr: shown, as it is when the command runs directly, and never
+    # fed down the pipe with the output.
+    warnings: list[str] = []
+
     def execute_cmd(cmd_args: list[str]) -> None:
         """Execute command with given args and write output to stdout."""
         if verbose:
             stdout.write(f"{cmd_name} {' '.join(cmd_args)}\n")
 
-        cmd_stdin = PipeStream()
-        cmd_stdout = PipeStream()
         token = _xargs_depth.set(depth + 1)
         try:
-            sub_ctx = CommandContext(
-                args=cmd_args,
-                stdin=cmd_stdin,
-                stdout=cmd_stdout,
-                fs=fs,
-                env=ctx.env,
-            )
-            result = cmd_func(sub_ctx)
-            if result and result.exit_code != 0:
-                raise TerminalError(
-                    f"{cmd_name}: {result.stderr}"
-                    if result.stderr
-                    else f"{cmd_name}: exited with code {result.exit_code}",
-                    exit_code=result.exit_code,
-                    stderr=result.stderr,
-                )
-        except TerminalError:
-            raise
-        except Exception as e:
-            raise TerminalError(f"{cmd_name}: execution error: {e}")
+            output, warning = dispatch_argv([cmd_name, *cmd_args], fs, ctx.env)
         finally:
             _xargs_depth.reset(token)
+        if warning:
+            warnings.append(warning.rstrip("\n"))
         # The sub-command's output is moved, not read: pass its bytes
         # through so a binary-producing command survives xargs.
         stdout.flush()
-        stdout.buffer.write(cmd_stdout.getvalue())
+        stdout.buffer.write(output)
 
-    if replace:
-        # -I mode: run command once per item, substituting placeholder
-        for item in items:
-            cmd_args = [arg.replace(replace, item) for arg in cmd_base_args]
-            execute_cmd(cmd_args)
-    elif max_args:
-        # -n mode: batch items
-        for i in range(0, len(items), max_args):
-            batch = items[i : i + max_args]
-            execute_cmd(cmd_base_args + batch)
-    else:
-        # Default: all items as arguments to single command
-        execute_cmd(cmd_base_args + items)
+    try:
+        if replace:
+            # -I mode: run command once per item, substituting placeholder
+            for item in items:
+                cmd_args = [arg.replace(replace, item) for arg in cmd_base_args]
+                execute_cmd(cmd_args)
+        elif max_args:
+            # -n mode: batch items
+            for i in range(0, len(items), max_args):
+                batch = items[i : i + max_args]
+                execute_cmd(cmd_base_args + batch)
+        else:
+            # Default: all items as arguments to single command
+            execute_cmd(cmd_base_args + items)
+    except TerminalError as e:
+        if not warnings:
+            raise
+        # the warnings of the runs before it are shown too
+        raise TerminalError(
+            e.message,
+            exit_code=e.exit_code,
+            stderr="\n".join(w for w in [*warnings, stderr_of(e)] if w),
+        )
+    if warnings:
+        return CommandResult(stderr="\n".join(warnings))
+    return None
