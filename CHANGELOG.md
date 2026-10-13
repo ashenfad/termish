@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.3] - 2026-10-13
 
 ### Added
 - **An optional `read_many(paths) -> dict[str, bytes]` on a filesystem** (#32). It reads several whole files at once, each path as given to its bytes, and leaves out a path that is not a file (missing, or a directory) rather than raising. It is not part of the `FileSystem` protocol, so a filesystem without it still passes `isinstance`. Keys are the paths exactly as given, relative ones included: `grep` looks its own paths up in the answer, and drops a batch keyed any other way to read file by file. `MemoryFS` has it, and `check_filesystem` checks it, keys included, on a filesystem that has it. monkeyfs's `VirtualFS`, `IsolatedFS` and `MountFS` already offer it.
