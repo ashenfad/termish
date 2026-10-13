@@ -194,13 +194,9 @@ class TestErrorPropagation:
         assert e.value.partial_output == "partial output\n"
         assert e.value.exit_code == 22
 
-    def test_failing_command_output_surfaces_over_a_redirect(self, fs):
-        """A failing command aborts before its `>` redirect is applied
-        (termish processes redirects post-return), so the body it wrote
-        surfaces in the transcript rather than the file. Before this
-        flush it was lost to both — the transcript is the strict
-        improvement, and the more useful place for an error the agent
-        needs to read."""
+    def test_failing_command_output_follows_its_redirect(self, fs):
+        """What a failing command wrote goes to its `>` target, as in
+        bash, and not to the transcript."""
 
         def failing(ctx: CommandContext) -> CommandResult | None:
             ctx.stdout.write("body\n")
@@ -208,7 +204,8 @@ class TestErrorPropagation:
 
         with pytest.raises(TerminalError) as e:
             execute("failing > out.txt", fs, commands={"failing": failing})
-        assert e.value.partial_output == "body\n"
+        assert e.value.partial_output == ""
+        assert fs.read("/out.txt") == b"body\n"
 
     def test_command_result_zero_exit_code_succeeds(self, fs):
         """CommandResult with exit_code=0 is treated as success."""

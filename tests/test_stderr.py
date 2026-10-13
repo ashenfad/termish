@@ -115,6 +115,53 @@ class TestSuccessWithStderr:
         assert out == "warn: something\n2\n"
 
 
+class TestFailingCommandOutput:
+    """A failing command's own stdout goes where it was sent (#31)."""
+
+    MISSING = "cat: /missing: No such file or directory\n"
+
+    def test_goes_to_its_output_redirect(self, fs):
+        fs.write("/a", b"AAA\n")
+        assert execute("cat /a /missing > /out; true", fs) == self.MISSING
+        assert fs.read("/out") == b"AAA\n"
+
+    def test_appends_with_double_redirect(self, fs):
+        fs.write("/a", b"AAA\n")
+        fs.write("/log", b"old\n")
+        execute("cat /a /missing >> /log; true", fs)
+        assert fs.read("/log") == b"old\nAAA\n"
+
+    def test_dev_null_discards_it(self, fs):
+        fs.write("/a", b"AAA\n")
+        assert execute("cat /a /missing > /dev/null; true", fs) == self.MISSING
+        assert not fs.exists("/dev/null")
+
+    def test_goes_to_the_transcript_without_a_redirect(self, fs):
+        fs.write("/a", b"AAA\n")
+        assert execute("cat /a /missing; true", fs) == "AAA\n" + self.MISSING
+
+    def test_follows_the_redirect_when_stderr_goes_to_a_file(self, fs):
+        fs.write("/a", b"AAA\n")
+        assert execute("cat /a /missing > /out 2> /err; true", fs) == ""
+        assert fs.read("/out") == b"AAA\n"
+        assert fs.read("/err").decode() == self.MISSING
+
+    def test_a_missing_command_still_creates_the_target(self, fs):
+        # bash opens the redirect before it looks the command up
+        execute("nosuch > /out; true", fs)
+        assert fs.read("/out") == b""
+
+    def test_the_failure_survives_an_unwritable_target(self):
+        class ReadOnlyFS(MemoryFS):
+            def write(self, path, content, mode="w"):
+                raise PermissionError("read-only")
+
+        fs = ReadOnlyFS()
+        with pytest.raises(TerminalError) as e:
+            execute("cat /missing > /out", fs)
+        assert e.value.message == "cat: /missing: No such file or directory"
+
+
 class TestStderrToFile:
     """`2>file` / `2>>file` / `2>/dev/null` route stderr instead of no-op."""
 
