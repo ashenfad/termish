@@ -190,6 +190,27 @@ class TestUnquotedBackslash:
         execute("echo hi > \\$NAME", fs, env=self.ENV)
         assert fs.read("/$NAME") == b"hi\n"
 
+    @pytest.mark.parametrize(
+        "script, out",
+        [
+            # an even run of backslashes leaves the quote after it a quote
+            (r"echo \\'$NAME'", "\\$NAME\n"),
+            (r"echo \\\\'$NAME'", "\\\\$NAME\n"),
+            (r'echo \\"$NAME"', "\\alice\n"),
+            (r'echo \\\\"$NAME"', "\\\\alice\n"),
+            (r"echo a\\'b c'd", "a\\b cd\n"),
+            (r"echo 'x'\\'y'", "x\\y\n"),
+            # an odd run escapes it
+            (r"echo \'$NAME", "'alice\n"),
+            (r"echo \\\'$NAME", "\\'alice\n"),
+            (r"echo \\\"$NAME", '\\"alice\n'),
+            (r"echo \'a b\'", "'a b'\n"),
+        ],
+    )
+    def test_before_a_quote(self, fs, script, out):
+        # each expected value is /bin/bash's output
+        assert execute(script, fs, env=self.ENV) == out
+
 
 class TestNonExpansion:
     """Forms with '$' that must stay literal."""

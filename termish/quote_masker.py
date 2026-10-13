@@ -29,9 +29,16 @@ def mask_quotes(text: str) -> Tuple[str, Dict[str, str]]:
     counter = 0
 
     # Regex to find quoted strings, handling escaped quotes inside.
-    # See QuoteMasker class history for detailed regex explanation.
-    # Use (?P=quote) for backreference to named group 'quote'.
-    regex = r'(?<!\\)(?P<quote>["\'])(?P<content>(?:\\.|(?!(?P=quote)).)*)(?P=quote)'
+    # A quote opens only after an even run of backslashes (none
+    # included): in ``\\'x'`` the backslashes escape each other and the
+    # quote still opens, while ``\\\'`` is an escaped quote. The run is
+    # matched from its start, so its parity is counted whole, and kept
+    # outside the mask.  Use (?P=quote) for backreference to named group
+    # 'quote'.
+    regex = (
+        r"(?<!\\)(?P<escapes>(?:\\\\)*)"
+        r"(?P<quote>[\"'])(?P<content>(?:\\.|(?!(?P=quote)).)*)(?P=quote)"
+    )
 
     def replacer(match):
         nonlocal counter
@@ -46,7 +53,7 @@ def mask_quotes(text: str) -> Tuple[str, Dict[str, str]]:
         counter += 1
 
         mask_map[token] = original_quoted
-        return token
+        return match.group("escapes") + token
 
     # flags=re.DOTALL ensures '.' matches newlines if they appear in content
     masked_text = re.sub(regex, replacer, text, flags=re.DOTALL)
