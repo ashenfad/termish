@@ -39,6 +39,9 @@ def fs():
         # a final ** names everything below, files included
         ("echo a/**", "a/ a/bg a/bg/x.png a/bg/y.png a/cards a/cards/z.png a/top.txt"),
         ("echo a/**/", "a/ a/bg/ a/cards/"),
+        # a relative **/ is the directories below, never the root (#31)
+        ("echo **/", "a/ a/bg/ a/cards/"),
+        ("cd a; echo **/", "bg/ cards/"),
         # dotfiles only for a pattern that starts with a dot
         ("echo a/.*", "a/.git a/.hid"),
         ("echo a/.h*", "a/.hid"),
@@ -118,6 +121,7 @@ PATTERNS = [
     "a/[!b]*",
     "*",
     "**",
+    "**/",
     "a/nope*",
 ]
 
