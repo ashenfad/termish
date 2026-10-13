@@ -81,6 +81,94 @@ class TestBasicFileOps:
         assert fs.read("/new.txt") == b"data"
 
 
+class TestNothingBelowAFile:
+    """A path below a file is ENOTDIR; one below a missing directory,
+    where the method doesn't create it, is ENOENT. Nothing leaves a path
+    both a file and a directory (#31)."""
+
+    @pytest.fixture
+    def fs(self):
+        fs = MemoryFS()
+        fs.write("/f", b"x")
+        fs.mkdir("/d")
+        return fs
+
+    def _unchanged(self, fs):
+        assert fs.isfile("/f") and not fs.isdir("/f")
+        assert fs.isdir("/d") and not fs.isfile("/d")
+        assert sorted(fs.list("/", recursive=True)) == ["d", "f"]
+
+    @pytest.mark.parametrize(
+        "make",
+        [
+            lambda fs: fs.write("/f/child", b"y"),
+            lambda fs: fs.write("/f/a/b", b"y"),
+            lambda fs: fs.mkdir("/f/sub"),
+            lambda fs: fs.mkdir("/f/a/b", parents=True),
+            lambda fs: fs.makedirs("/f/sub"),
+            lambda fs: fs.rename("/d", "/f/moved"),
+        ],
+    )
+    def test_below_a_file_is_not_a_directory(self, fs, make):
+        with pytest.raises(NotADirectoryError):
+            make(fs)
+        self._unchanged(fs)
+
+    def test_a_file_cannot_move_below_itself(self, fs):
+        with pytest.raises(NotADirectoryError):
+            fs.rename("/f", "/f/moved")
+        self._unchanged(fs)
+
+    @pytest.mark.parametrize(
+        "make",
+        [
+            lambda fs: fs.mkdir("/nope/sub"),
+            lambda fs: fs.rename("/f", "/nope/f"),
+            lambda fs: fs.rename("/d", "/nope/d"),
+        ],
+    )
+    def test_below_a_missing_directory_is_not_found(self, fs, make):
+        with pytest.raises(FileNotFoundError):
+            make(fs)
+        self._unchanged(fs)
+
+    def test_write_still_creates_missing_directories(self, fs):
+        fs.write("/d/a/b", b"y")
+        assert fs.isdir("/d/a") and fs.read("/d/a/b") == b"y"
+
+    @pytest.mark.parametrize(
+        "make, error",
+        [
+            (lambda fs: fs.write("/d", b"y"), IsADirectoryError),
+            (lambda fs: fs.write("/", b"y"), IsADirectoryError),
+            (lambda fs: fs.makedirs("/f"), FileExistsError),
+            (lambda fs: fs.rename("/f", "/d"), IsADirectoryError),
+            (lambda fs: fs.rename("/d", "/f"), NotADirectoryError),
+        ],
+    )
+    def test_a_file_and_a_directory_never_share_a_path(self, fs, make, error):
+        with pytest.raises(error):
+            make(fs)
+        self._unchanged(fs)
+
+    def test_a_directory_moves_onto_an_empty_one_only(self, fs):
+        fs.write("/e/x", b"")
+        with pytest.raises(OSError):
+            fs.rename("/d", "/e")
+        fs.rename("/e", "/d")
+        assert fs.read("/d/x") == b"" and not fs.exists("/e")
+
+    def test_a_directory_never_moves_into_itself(self, fs):
+        with pytest.raises(OSError):
+            fs.rename("/d", "/d/sub")
+        self._unchanged(fs)
+
+    def test_renaming_onto_itself_changes_nothing(self, fs):
+        fs.rename("/f", "/f")
+        fs.rename("/d", "/d")
+        self._unchanged(fs)
+
+
 class TestRangedRead:
     def _fs(self):
         fs = MemoryFS()
