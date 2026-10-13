@@ -84,10 +84,28 @@ def test_a_bare_operator_is_a_literal_character(fs):
         (r"\(x\)\1", r"(x)\1"),
         (r"a\.b\*", r"a\.b\*"),
         ("trail\\", "trail\\\\"),
+        (r"\<a\>", r"\b(?=\w)a\b(?<=\w)"),
     ],
 )
 def test_translation(bre, python):
     assert bre_to_python(bre) == python
+
+
+@pytest.mark.parametrize(
+    "command, expected",
+    [
+        (r"grep '\<foo\>' w.txt", "foo\n"),
+        (r"grep '\<foo' w.txt", "foo\nfoox\n"),
+        (r"grep 'foo\>' w.txt", "xfoo\nfoo\n"),
+        (r"grep '\>foo' w.txt; echo $?", "1\n"),
+        (r"grep 'foo\<' w.txt; echo $?", "1\n"),
+        (r"sed 's/\>/|/g' w.txt", "xfoo|\nfoo|\nfoox|\n"),
+    ],
+)
+def test_word_boundaries_keep_to_their_edge(fs, command, expected):
+    # \< is only the start of a word and \> only its end, as in GNU (#31)
+    fs.write("/w.txt", b"xfoo\nfoo\nfoox\n")
+    assert execute(command, fs) == expected
 
 
 # -- grep's exit status ---------------------------------------------------

@@ -30,7 +30,9 @@ def bre_to_python(pattern: str) -> str:
     - ``^`` anchors only at those same starting points and ``$`` only at
       the end of the pattern, of a group or of an alternative; anywhere
       else each is a literal character.
-    - ``\<`` and ``\>`` (GNU word boundaries) become ``\b``.
+    - ``\<`` and ``\>`` (GNU's start and end of a word) become
+      ``\b(?=\w)`` and ``\b(?<=\w)``: a bare ``\b`` would match either
+      edge.
     - Every other escape — ``\1``-``\9``, ``\.``, ``\*``, ``\w`` — is
       kept as it is, since it means the same to ``re``.
 
@@ -59,8 +61,11 @@ def bre_to_python(pattern: str) -> str:
             if nxt in _SWAPPED:
                 out.append(nxt)
                 at_start = nxt in "(|"
-            elif nxt in "<>":
-                out.append(r"\b")
+            elif nxt == "<":
+                out.append(r"\b(?=\w)")  # the start of a word
+                at_start = False
+            elif nxt == ">":
+                out.append(r"\b(?<=\w)")  # the end of a word
                 at_start = False
             else:
                 out.append("\\" + nxt)
