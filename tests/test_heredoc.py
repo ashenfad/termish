@@ -175,3 +175,11 @@ def test_hash_inside_quotes_not_a_comment():
     fs = MemoryFS()
     out = execute("echo '#<<EOF literal'", fs)
     assert out.strip() == "#<<EOF literal"
+
+
+@pytest.mark.parametrize(
+    "script", ["echo hi;# <<EOF", "echo hi &&# <<EOF", "echo hi|cat;# <<EOF"]
+)
+def test_heredoc_op_in_comment_after_operator_ignored(script):
+    # the tokenizer starts a comment after an operator too (#31)
+    assert execute(script, MemoryFS()) == "hi\n"

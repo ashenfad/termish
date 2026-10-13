@@ -50,15 +50,71 @@ def _reject_control_flow(word: str) -> None:
         raise ParseError(f"function: {_FUNCTION_ADVICE}")
 
 
+#: What a word starts after: whitespace, a newline, or an operator
+#: character. A ``#`` starts a comment only there, as in bash.
+_WORD_BREAKS = frozenset(" \t\r\n;&|<>()")
+
+
+def _comments(text: str) -> list[tuple[int, int]]:
+    """The comments in ``text``, as ``(start, end)`` spans.
+
+    A ``#`` starts a comment when it is unquoted, unescaped, and starts
+    a word: at the beginning of a line, or after whitespace or an
+    operator character (``echo hi;# note``). Inside a word it is a
+    literal character (``a#b``, ``http://host/page#frag``, ``$#``). A
+    comment runs to the end of its line, and quotes in it are inert
+    (``# don't``). The heredoc scanner and the tokenizer both go by
+    this, so neither sees a ``<<`` or ``$(`` in a comment.
+    """
+    spans: list[tuple[int, int]] = []
+    in_single = in_double = False
+    word_start = True
+    i = 0
+    while i < len(text):
+        c = text[i]
+        if c == "\\" and not in_single:
+            i += 2
+            word_start = False
+            continue
+        if c == "'" and not in_double:
+            in_single = not in_single
+        elif c == '"' and not in_single:
+            in_double = not in_double
+        elif c == "#" and word_start and not in_single and not in_double:
+            end = text.find("\n", i)
+            end = len(text) if end == -1 else end
+            spans.append((i, end))
+            i = end
+            continue
+        word_start = c in _WORD_BREAKS and not in_single and not in_double
+        i += 1
+    return spans
+
+
+def _drop_comments(text: str) -> str:
+    """``text`` without its comments; the newlines that end them stay."""
+    if "#" not in text:
+        return text
+    kept: list[str] = []
+    pos = 0
+    for start, end in _comments(text):
+        kept.append(text[pos:start])
+        pos = end
+    kept.append(text[pos:])
+    return "".join(kept)
+
+
 def _find_heredoc_ops(line: str) -> list[int]:
     """Positions of ``<<`` operators OUTSIDE quotes in a raw line.
 
     Expansion happens at execution time, never at parse time, so quote
     state is a simple two-flag scan; backslash escapes the next char
-    outside single quotes.
+    outside single quotes. A comment is cut off first: the tokenizer
+    drops it, and a ``<<`` in it must not start a phantom heredoc.
     Triple ``<<<`` (herestring) is not supported and is skipped so it
     falls through to the tokenizer as a normal parse problem.
     """
+    line = _drop_comments(line)
     positions: list[int] = []
     in_single = in_double = False
     i = 0
@@ -71,16 +127,6 @@ def _find_heredoc_ops(line: str) -> list[int]:
             in_single = not in_single
         elif c == '"' and not in_single:
             in_double = not in_double
-        elif (
-            c == "#"
-            and not in_single
-            and not in_double
-            and (i == 0 or line[i - 1] in " \t")
-        ):
-            # Unquoted word-start '#' begins a comment — the tokenizer
-            # (shlex commenters) strips it; the scanner must agree or
-            # a '<<' inside a comment starts a phantom heredoc.
-            break
         elif (
             c == "<"
             and not in_single
@@ -191,6 +237,19 @@ def _handle_line_continuation(text: str) -> str:
     return re.sub(r"\\\n[ \t]*", " ", text)
 
 
+def _has_substitution(text: str) -> bool:
+    """Whether ``text`` holds a ``$(`` whose ``$`` is not escaped."""
+    i = 0
+    while i < len(text) - 1:
+        if text[i] == "\\":
+            i += 2
+            continue
+        if text[i] == "$" and text[i + 1] == "(":
+            return True
+        i += 1
+    return False
+
+
 def _keep_escapes(text: str) -> str:
     r"""Protect the backslash of an unquoted ``\$`` or ``\\`` from shlex.
 
@@ -247,15 +306,23 @@ def to_script(text: str) -> Script:
     # 0b. Handle line continuation (backslash-newline)
     text = _handle_line_continuation(text)
 
+    # 0c. Drop comments here rather than in shlex, whose commenters
+    # start one at any '#', even mid-word, and before masking, which
+    # would pair the apostrophe in "# don't" with a quote on a later line.
+    text = _drop_comments(text)
+
     # 1. Mask quoted strings to prevent shlex from stripping quotes
     # This preserves "'*'" as "'*'" in the token stream instead of "*"
     masked_text, mask_map = mask_quotes(text)
 
     # Command substitution is unsupported; fail loudly rather than let
     # "$(cmd)" tokenize into mangled args ("$", "(", "cmd", ")") or pass
-    # through unexpanded inside double quotes.  Single-quoted "$(...)"
-    # stays a harmless literal, exactly as in bash.
-    if "$(" in masked_text or any(v[0] == '"' and "$(" in v for v in mask_map.values()):
+    # through unexpanded inside double quotes.  Checked once comments
+    # are gone, so one may mention it.  Single-quoted "$(...)" and an
+    # escaped "\$(" stay harmless literals, exactly as in bash.
+    if _has_substitution(masked_text) or any(
+        v[0] == '"' and _has_substitution(v) for v in mask_map.values()
+    ):
         raise ParseError(
             "Command substitution '$(...)' is not supported; "
             "run the inner command separately"
@@ -272,7 +339,9 @@ def to_script(text: str) -> Script:
     # "$?{}" keeps variable forms ("$?", "$NAME", "${NAME}") intact as
     # single words for execution-time expansion. "[]" keeps a glob's
     # class ("a/[bc]*") one word; `[ -f x ]` still splits on its spaces.
-    lexer.wordchars += ":@,%+!^$?{}[]"
+    lexer.wordchars += ":@,%+!^$?{}[]#"
+    # Comments are already gone; a '#' left is part of a word.
+    lexer.commenters = ""
 
     # Treat newlines as tokens, not whitespace, so we can use them as separators
     lexer.whitespace = " \t\r"
