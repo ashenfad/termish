@@ -101,7 +101,9 @@ def _walk(
 ) -> None:
     if i == len(parts):
         if trailing:
-            if _isdir(fs, base):
+            # a relative **/ gets here with no base at all: that is the
+            # working directory, which is never a match of its own
+            if base and _isdir(fs, base):
                 found.add(base if base.endswith("/") else base + "/")
         elif base:
             found.add(base)
