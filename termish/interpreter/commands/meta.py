@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from termish.context import CommandContext, CommandResult
 from termish.errors import TerminalError
 
-from ._dispatch import dispatch_argv, stderr_of
+from ._dispatch import dispatch_argv, join_stderr, stderr_of
 
 _MAX_XARGS_DEPTH = 16
 _xargs_depth: contextvars.ContextVar[int] = contextvars.ContextVar(
@@ -120,7 +120,7 @@ def xargs(ctx: CommandContext) -> CommandResult | None:
         finally:
             _xargs_depth.reset(token)
         if warning:
-            warnings.append(warning.rstrip("\n"))
+            warnings.append(warning)
         # The sub-command's output is moved, not read: pass its bytes
         # through so a binary-producing command survives xargs.
         stdout.flush()
@@ -147,8 +147,8 @@ def xargs(ctx: CommandContext) -> CommandResult | None:
         raise TerminalError(
             e.message,
             exit_code=e.exit_code,
-            stderr="\n".join(w for w in [*warnings, stderr_of(e)] if w),
+            stderr=join_stderr([*warnings, stderr_of(e)]),
         )
     if warnings:
-        return CommandResult(stderr="\n".join(warnings))
+        return CommandResult(stderr=join_stderr(warnings))
     return None

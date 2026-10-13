@@ -55,7 +55,11 @@ def dispatch_argv(argv: list[str], fs: FileSystem, env: dict[str, str]) -> Dispa
 
 
 def stderr_of(e: TerminalError) -> str:
-    """What a failure shows on stderr, without a trailing newline ("" if
-    it failed silently)."""
-    text = e.message if e.stderr is None else e.stderr
-    return text.rstrip("\n")
+    """What a failure shows on stderr ("" if it failed silently)."""
+    return e.message if e.stderr is None else e.stderr
+
+
+def join_stderr(parts: list[str]) -> str:
+    """Several commands' stderr as one, each as written: a newline is
+    added only where one is missing, so blank lines survive."""
+    return "".join(p if p.endswith("\n") else p + "\n" for p in parts if p)

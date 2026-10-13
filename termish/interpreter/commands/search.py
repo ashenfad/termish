@@ -16,7 +16,7 @@ from termish.errors import TerminalError
 from termish.fs import FileSystem
 
 from ._argparse import CommandArgParser
-from ._dispatch import dispatch_argv, stderr_of
+from ._dispatch import dispatch_argv, join_stderr, stderr_of
 from ._regex import bre_to_python
 
 # How many files grep reads in one batch: enough that a filesystem that
@@ -930,7 +930,7 @@ def find(ctx: CommandContext) -> CommandResult | None:
                 exec_stderr.append(text)
             raise
         if warning:
-            exec_stderr.append(warning.rstrip("\n"))
+            exec_stderr.append(warning)
         return output
 
     predicate = _parse_find_predicates(
@@ -976,6 +976,6 @@ def find(ctx: CommandContext) -> CommandResult | None:
     batches_ok = _finalize_batch(predicate, fs)
     if exec_stderr or not batches_ok:
         return CommandResult(
-            exit_code=0 if batches_ok else 1, stderr="\n".join(exec_stderr)
+            exit_code=0 if batches_ok else 1, stderr=join_stderr(exec_stderr)
         )
     return None

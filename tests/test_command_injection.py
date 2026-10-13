@@ -278,6 +278,22 @@ class TestXargsWithInjection:
             "warning\nwarning\nout\nout\n"
         )
 
+    @pytest.mark.parametrize("warning", ["first\n\n", "\n", "a\n\nb"])
+    def test_xargs_shows_a_warning_as_written(self, fs, warning):
+        """Blank lines in a warning survive xargs, as they do when the
+        command runs directly."""
+
+        def warn(ctx: CommandContext) -> CommandResult | None:
+            ctx.stdout.write("out\n")
+            return CommandResult(stderr=warning)
+
+        commands = {"warn": warn}
+        direct = execute("warn x", fs, commands=commands)
+        assert execute("echo x | xargs warn", fs, commands=commands) == direct
+        assert execute("echo x y | xargs -n 1 warn", fs, commands=commands) == (
+            2 * (warning if warning.endswith("\n") else warning + "\n") + "out\nout\n"
+        )
+
     def test_xargs_keeps_earlier_warnings_when_a_later_run_fails(self, fs):
         def picky(ctx: CommandContext) -> CommandResult | None:
             if ctx.args == ["bad"]:
