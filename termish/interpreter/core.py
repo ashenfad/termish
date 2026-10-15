@@ -37,6 +37,7 @@ from .commands import (
     search,
     text,
 )
+from .commands import awk as awk_cmd
 from .commands import diff as diff_cmd
 from .commands import file as file_mod
 from .commands import io as io_cmds
@@ -112,6 +113,7 @@ BUILTINS: dict[str, CommandFunc] = {
     "uniq": text.uniq,
     "cut": text.cut,
     "sed": sed_cmd.sed,
+    "awk": awk_cmd.awk,
     "tr": text.tr,
     # Diff
     "diff": diff_cmd.diff,

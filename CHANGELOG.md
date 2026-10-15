@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Brace expansion.** `{a,b}` lists and `{1..3}`, `{a..e}`, `{01..10}`, `{1..10..2}` sequences expand before variables and globs, as in bash; a brace with nothing to expand (`{}`, `{x}`) stays literal.
 - **`$PWD`, and defaults.** `$PWD` is always the current directory, and `${NAME:-word}` / `${NAME-word}` give a default for a variable that may be unset.
 - **Small commands:** `date`, `seq`, `du`, `stat`, `realpath`, `paste`, `comm`, `rev`, `md5sum`/`sha256sum`, `which`, `command` and `help`, which lists every command (an injected one's too, by its `description`) and shows how one is used.
+- **awk**: a bounded awk with its own lexer, parser and interpreter (patterns, fields, arrays, `printf`, `sub`/`gsub`/`split`/`match` and the usual builtins); `getline`, `system()`, `rand()`, user-defined functions and pipes in `print` are refused by name.
 
 ### Changed
 - **Breaking: an unset variable is an error.** `$NAME` with `NAME` unset stops the script with `NAME: unbound variable`, as under bash's `set -u`, so `rm -r $DIR/x` never runs as `rm -r /x`; hosts should pass `HOME`.
