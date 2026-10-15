@@ -447,7 +447,9 @@ def test_line_continuation():
 def test_control_flow_keyword_in_command_position(keyword, advice):
     with pytest.raises(ParseError) as exc:
         to_script(f"{keyword} whatever")
-    assert str(exc.value).startswith(f"{keyword}: control flow is not supported")
+    assert str(exc.value).startswith(
+        f"line 1, col 1: {keyword}: control flow is not supported"
+    )
     if advice:
         assert re.search(advice, str(exc.value))
 
@@ -458,9 +460,13 @@ def test_control_flow_reports_only_the_first_keyword():
         to_script("for f in a b; do echo $f; done")
     message = str(exc.value)
     assert message == (
+        "line 1, col 1: "
         "for: control flow is not supported; use xargs or find -exec for iteration"
     )
     assert "do:" not in message and "done:" not in message
+    with pytest.raises(ParseError) as exc:
+        to_script("for f in a b\ndo\n  echo $f\ndone")
+    assert str(exc.value) == message
 
 
 @pytest.mark.parametrize(
@@ -507,7 +513,9 @@ def test_keyword_as_redirect_target():
 
 
 def test_function_keyword_rejected():
-    with pytest.raises(ParseError, match="^function: function definitions"):
+    with pytest.raises(
+        ParseError, match="^line 1, col 1: function: function definitions"
+    ):
         to_script("function greet { echo hi; }")
 
 
@@ -515,7 +523,9 @@ def test_function_keyword_rejected():
     "script", ["greet() { echo hi; }", "greet () { echo hi; }", "greet( ) { echo hi; }"]
 )
 def test_function_definition_form_rejected(script):
-    with pytest.raises(ParseError, match=r"^greet\(\): function definitions"):
+    with pytest.raises(
+        ParseError, match=r"^line 1, col 1: greet\(\): function definitions"
+    ):
         to_script(script)
 
 
@@ -554,9 +564,65 @@ def test_a_conditional_points_at_test_and_the_operators():
     with pytest.raises(ParseError) as exc:
         to_script("if [ -f a ]; then echo y; fi")
     assert str(exc.value) == (
-        "if: control flow is not supported; "
+        "line 1, col 1: if: control flow is not supported; "
         "test with [ ... ] and branch with && and || instead"
     )
+
+
+# Where, and how many: every problem at once, each with its line and column
+
+
+def test_names_the_line_and_column_of_each_in_order():
+    with pytest.raises(ParseError) as exc:
+        to_script('echo a\necho $((2+3))\nN=3\necho "x $(date)"')
+    assert str(exc.value) == "\n".join(
+        [
+            "line 2, col 6: arithmetic expansion $((...)) is not supported; "
+            "compute it in run_python",
+            "line 3, col 1: N=3: variable assignment is not supported; "
+            "write the value where it's used, or compute it in run_python",
+            "line 4, col 9: Command substitution '$(...)' is not supported; "
+            "run the inner command separately",
+        ]
+    )
+
+
+def test_counts_lines_and_columns_in_the_script_as_written():
+    # a continuation, a quoted span and a heredoc body before the problem
+    script = 'echo "a b" \\\n  c\ncat <<EOF\nbody\nEOF\n  if x'
+    with pytest.raises(ParseError, match="^line 6, col 3: if: "):
+        to_script(script)
+
+
+def test_reports_a_structural_error_with_the_problems_before_it():
+    with pytest.raises(ParseError) as exc:
+        to_script("N=1\necho a | | b")
+    assert str(exc.value) == "\n".join(
+        [
+            "line 1, col 1: N=1: variable assignment is not supported; "
+            "write the value where it's used, or compute it in run_python",
+            "line 2, col 10: Expected command after '|', got '|'",
+        ]
+    )
+
+
+def test_runs_nothing_when_anything_is_reported():
+    fs = MemoryFS()
+    with pytest.raises(ParseError):
+        execute("echo hi > a.txt\necho $((1))", fs)
+    assert not fs.exists("/a.txt")
+
+
+def test_sees_assignments_as_a_prefix_and_after_a_pipe_not_as_arguments():
+    with pytest.raises(ParseError, match="N=3: variable assignment"):
+        to_script("N=3 echo hi")
+    with pytest.raises(ParseError, match='X="a b": variable assignment'):
+        to_script('echo | X="a b" cat')
+    to_script("echo N=3; env A=1; [ a = b ]")
+
+
+def test_leaves_substitutions_alone_in_single_quotes_and_escaped():
+    to_script("echo '$((1))' \\$(x) '$(y)'")
 
 
 # Comments: a '#' that starts a word, as in bash (#31)

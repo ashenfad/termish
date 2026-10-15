@@ -83,12 +83,37 @@ class TestVarExpansion:
     def test_single_quotes_literal(self, fs):
         assert execute("echo '$NAME'", fs, env={"NAME": "alice"}) == "$NAME\n"
 
-    def test_unset_expands_empty(self, fs):
-        assert execute('echo "[$UNSET]"', fs) == "[]\n"
+    def test_unset_stops_the_script(self, fs):
+        # bash's set -u: the command doesn't run, nor anything after it
+        with pytest.raises(TerminalError, match="UNSET: unbound variable"):
+            execute('echo "[$UNSET]"', fs)
+        with pytest.raises(TerminalError) as info:
+            execute("echo before; rm -r $UNSET/x; echo after", fs)
+        assert info.value.message == "UNSET: unbound variable"
+        assert info.value.exit_code == 1
+        assert info.value.partial_output == "before\n"
+        with pytest.raises(TerminalError, match="unbound"):
+            execute("echo ${UNSET} || echo rescued", fs)
 
-    def test_unset_unquoted_word_removal(self, fs):
+    def test_default_for_one_that_may_be_unset(self, fs):
+        assert execute('echo "[${UNSET:-}]"', fs) == "[]\n"
+        out = execute("echo ${UNSET:-fallback} ${UNSET-dash}", fs)
+        assert out == "fallback dash\n"
+        env = {"EMPTY": "", "NAME": "alice"}
+        assert execute('echo "[${EMPTY:-x}] [${EMPTY-x}]"', fs, env=env) == "[x] []\n"
+        out = execute("echo ${NAME:-x} ${UNSET:-$NAME}", fs, env=env)
+        assert out == "alice alice\n"
+
+    def test_empty_unquoted_word_removal(self, fs):
         # bash: an unquoted arg that expands to nothing disappears
-        assert execute("echo a $UNSET b", fs) == "a b\n"
+        assert execute("echo a $EMPTY b", fs, env={"EMPTY": ""}) == "a b\n"
+
+    def test_pwd_is_the_current_directory(self, fs):
+        execute("mkdir -p /w/sub", fs)
+        out = execute(
+            'cd /w; echo $PWD; cd sub && echo "${PWD}"', fs, env={"PWD": "/no"}
+        )
+        assert out == "/w\n/w/sub\n"
 
     def test_escaped_dollar_in_double_quotes(self, fs):
         out = execute('echo "\\$NAME"', fs, env={"NAME": "alice"})
@@ -120,11 +145,12 @@ class TestVarExpansion:
 
     def test_empty_command_name_shifts(self, fs):
         # zsh-style: an empty-expanding command word shifts away
-        assert execute("$UNSET echo hi", fs) == "hi\n"
+        assert execute("$EMPTY echo hi", fs, env={"EMPTY": ""}) == "hi\n"
 
     def test_all_words_empty_is_silent_noop(self, fs):
-        assert execute("$UNSET", fs) == ""
-        assert execute("$UNSET; echo $?", fs) == "0\n"
+        env = {"EMPTY": ""}
+        assert execute("$EMPTY", fs, env=env) == ""
+        assert execute("$EMPTY; echo $?", fs, env=env) == "0\n"
 
     def test_multiword_command_name_does_not_split(self, fs):
         # deliberately zsh, not bash: no field splitting of expansions
@@ -268,3 +294,18 @@ class TestRetrospective:
             execute("echo start; cat /missing", fs)
         assert exc_info.value.partial_output == "start\n"
         assert exc_info.value.exit_code == 1
+
+
+class TestBraces:
+    def test_refuse_more_words_than_the_limit(self, fs):
+        with pytest.raises(TerminalError, match="brace expansion: more than"):
+            execute("echo {1..200000}", fs)
+        with pytest.raises(TerminalError, match="brace expansion: more than"):
+            execute("echo " + "{a,b}" * 17, fs)
+
+    def test_expand_in_the_command_name(self, fs):
+        assert execute("{echo,hi}", fs) == "hi\n"
+
+    def test_an_escaped_glob_or_separator_is_a_literal(self, fs):
+        fs.write("/a.txt", b"")
+        assert execute(r"echo \*.txt \; x", fs) == "*.txt ; x\n"

@@ -1,12 +1,20 @@
 """
 Core interpreter logic for executing terminal scripts against a FileSystem.
 Functional implementation.
+
+Each command's words expand braces, then ``$NAME``, ``${NAME}`` and
+``$?``, then globs, as in bash. ``$PWD`` is the current directory,
+whatever the environment says. A variable that isn't set is an error
+that stops the script, as under bash's ``set -u``: with no assignment in
+the language, every variable comes from the host, so an unset one is a
+mistake, and ``cd $DIR`` or ``rm -r $DIR/x`` must not run as ``cd`` or
+``rm -r /x``.
 """
 
 import contextvars
 import io
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 
 from termish.ast import Pipeline, Script
 from termish.context import CommandContext, PipeStream
@@ -14,6 +22,7 @@ from termish.errors import CommandFunc, TerminalError
 from termish.fs import FileSystem
 from termish.quote_masker import mask_quotes, unmask_and_unquote
 
+from .brace import expand_braces
 from .commands import archive, conditional, control, filesystem, meta, search, text
 from .commands import diff as diff_cmd
 from .commands import file as file_mod
@@ -42,6 +51,14 @@ def _is_dev_null(target: str, fs: FileSystem) -> bool:
 _injected_commands: contextvars.ContextVar[Mapping[str, CommandFunc]] = (
     contextvars.ContextVar("_injected_commands", default={})
 )
+
+
+class _UnboundVariable(TerminalError):
+    """``$NAME`` with ``NAME`` unset: the command doesn't run, nor
+    anything after it."""
+
+    def __init__(self, name: str):
+        super().__init__(f"{name}: unbound variable")
 
 
 def result_stderr(result: object) -> str:
@@ -134,7 +151,8 @@ def execute_script(
         env: Optional environment variables for ``$VAR`` expansion.
             The dict is shared with command handlers via ``ctx.env``,
             so handler mutations are visible to later commands and to
-            the caller. Defaults to an empty environment.
+            the caller. Defaults to an empty environment. A host should
+            set ``HOME``; ``$PWD`` is always the current directory.
 
     Returns:
         The terminal transcript as a string: captured stdout, plus
@@ -202,6 +220,12 @@ def _execute_script_inner(script: Script, fs: FileSystem, env: dict[str, str]) -
             last_succeeded = True
             last_error = None
             last_exit_code = 0
+        except _UnboundVariable as e:
+            raise TerminalError(
+                e.message,
+                partial_output=_transcript(final_output),
+                exit_code=e.exit_code,
+            ) from None
         except TerminalError as e:
             last_succeeded = False
             last_error = e
@@ -258,13 +282,16 @@ def _execute_pipeline(
         cmd_stdout = PipeStream()
 
         # Expand the command name and args as one word list so an
-        # empty-expanding name shifts away (zsh-style: `$UNSET echo hi`
+        # empty-expanding name shifts away (zsh-style: `$EMPTY echo hi`
         # runs `echo hi`).  Multi-word values do NOT field-split —
         # deliberately zsh, not bash: `CMD="echo hello"; $CMD` is
         # "echo hello: command not found", never a silent re-parse.
-        words = _expand_args([cmd_node.name] + cmd_node.args, fs, env, last_exit_code)
+        variables = _variables(env, fs)
+        words = _expand_args(
+            [cmd_node.name] + cmd_node.args, fs, variables, last_exit_code
+        )
         if not words:
-            # The whole command expanded to nothing (`$UNSET` alone):
+            # The whole command expanded to nothing (`$EMPTY` alone):
             # a silent no-op, like zsh.  Redirects are not processed.
             merged_failure = None
             current_input = b""
@@ -282,7 +309,7 @@ def _execute_pipeline(
                 # were quoted) — no expansion.
                 cmd_stdin = PipeStream((input_redirect.content or "").encode("utf-8"))
             else:
-                target = _expand_word(input_redirect.target, env, last_exit_code)
+                target = _expand_word(input_redirect.target, variables, last_exit_code)
                 if _is_dev_null(target, fs):
                     # Reads as empty, as in bash: there is no device to
                     # open, and no file of that name should be needed.
@@ -308,7 +335,7 @@ def _execute_pipeline(
         def write_redirects(data: bytes) -> None:
             """Write ``data`` to each of the command's output redirects."""
             for r in output_redirects:
-                target = _expand_word(r.target, env, last_exit_code)
+                target = _expand_word(r.target, variables, last_exit_code)
                 if _is_dev_null(target, fs):
                     # Discarded, as stderr's 2>/dev/null already was.
                     # Written as a file it lands in the filesystem as
@@ -411,7 +438,7 @@ def _execute_pipeline(
         else:
             # 2>file truncates (even when no stderr was produced, as in
             # bash); 2>>file appends; /dev/null discards.
-            target = _expand_word(stderr_redirect.target, env, last_exit_code)
+            target = _expand_word(stderr_redirect.target, variables, last_exit_code)
             if not _is_dev_null(target, fs):
                 path = resolve_path(target, fs)
                 try:
@@ -465,21 +492,34 @@ def _execute_pipeline(
 # alternatives implement the double-quote backslash rule: backslash is
 # special only before '\' or '$' (so "\d" in a regex stays "\d", while
 # "\\$NAME" is an escaped backslash followed by a live expansion).
+# "${NAME:-word}" and "${NAME-word}" give "word" (itself expanded) for a
+# variable that's unset ("-"), or unset or empty (":-"): the way to read
+# one that may not be set.
 _VAR_RE = re.compile(
     r"\\\\"  # escaped backslash -> literal backslash
     r"|\\\$"  # escaped dollar -> literal $
     r"|\$\?"  # last exit code
-    r"|\$\{([A-Za-z_][A-Za-z0-9_]*)\}"  # ${NAME}
+    r"|\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:?-)([^}]*))?\}"  # ${NAME}, ${NAME:-word}
     r"|\$([A-Za-z_][A-Za-z0-9_]*)"  # $NAME
 )
 
+#: A variable's value, or None when it isn't set.
+Variables = Callable[[str], "str | None"]
 
-def _expand_vars(text: str, env: dict[str, str], last_exit_code: int) -> str:
-    """Expand ``$?``, ``$NAME``, and ``${NAME}`` in text.
 
-    Unset variables expand to the empty string (POSIX).  ``\\$``
-    suppresses expansion and yields a literal ``$``; ``\\\\`` yields a
-    literal backslash (so ``\\\\$NAME`` is a backslash plus expansion).
+def _variables(env: dict[str, str], fs: FileSystem) -> Variables:
+    """The variables one command expands with: ``env``'s, with ``PWD``
+    the current directory (asked for only when it's read)."""
+    return lambda name: fs.getcwd() if name == "PWD" else env.get(name)
+
+
+def _expand_vars(text: str, variables: Variables, last_exit_code: int) -> str:
+    """Expand ``$?``, ``$NAME``, ``${NAME}`` and ``${NAME:-word}`` in text.
+
+    An unset variable with no default raises ``_UnboundVariable``.
+    ``\\$`` suppresses expansion and yields a literal ``$``; ``\\\\``
+    yields a literal backslash (so ``\\\\$NAME`` is a backslash plus
+    expansion).
     """
     if "$" not in text and "\\\\" not in text:
         return text
@@ -492,8 +532,14 @@ def _expand_vars(text: str, env: dict[str, str], last_exit_code: int) -> str:
             return "$"
         if s == "$?":
             return str(last_exit_code)
-        name = m.group(1) or m.group(2)
-        return env.get(name, "")
+        name = m.group(1) or m.group(4)
+        op, fallback = m.group(2), m.group(3)
+        value = variables(name)
+        if op is not None and (value is None or (op == ":-" and value == "")):
+            return _expand_vars(fallback or "", variables, last_exit_code)
+        if value is None:
+            raise _UnboundVariable(name)
+        return value
 
     return _VAR_RE.sub(repl, text)
 
@@ -501,7 +547,7 @@ def _expand_vars(text: str, env: dict[str, str], last_exit_code: int) -> str:
 def _expand_masked(
     masked: str,
     mask_map: dict[str, str],
-    env: dict[str, str],
+    variables: Variables,
     last_exit_code: int,
 ) -> str:
     """Variable-expand a quote-masked word, honoring quote semantics.
@@ -510,55 +556,70 @@ def _expand_masked(
     expanded; single-quoted regions stay literal.  Returns the masked
     text (mask_map is updated in place for expanded regions).
     """
-    masked = _expand_vars(masked, env, last_exit_code)
+    masked = _expand_vars(masked, variables, last_exit_code)
     for token, original in mask_map.items():
         if original[0] == '"':
-            inner = _expand_vars(original[1:-1], env, last_exit_code)
+            inner = _expand_vars(original[1:-1], variables, last_exit_code)
             mask_map[token] = '"' + inner + '"'
     return masked
 
 
-def _expand_word(word: str, env: dict[str, str], last_exit_code: int) -> str:
-    """Expand variables in a single word (command name or redirect target)
-    and strip quotes.  No globbing, no word removal."""
+def _braced(masked: str, mask_map: dict[str, str]) -> list[tuple[str, dict[str, str]]]:
+    """``masked``'s brace expansion, each word with the placeholders it
+    holds (a map of its own, as expansion rewrites the double-quoted
+    ones)."""
+    return [
+        (word, {k: v for k, v in mask_map.items() if k in word})
+        for word in expand_braces(masked)
+    ]
+
+
+def _expand_word(word: str, variables: Variables, last_exit_code: int) -> str:
+    """Expand braces and variables in a single word (a redirect target)
+    and strip quotes.  No globbing, no word removal; braces that make
+    more than one word are an error, as in bash."""
     masked, mask_map = mask_quotes(word)
-    masked = _expand_masked(masked, mask_map, env, last_exit_code)
-    return unmask_and_unquote(masked, mask_map)
+    words = _braced(masked, mask_map)
+    if len(words) != 1:
+        raise TerminalError(f"{word}: ambiguous redirect")
+    only, own = words[0]
+    return unmask_and_unquote(_expand_masked(only, own, variables, last_exit_code), own)
 
 
 def _expand_args(
     args: list[str],
     fs: FileSystem,
-    env: dict[str, str],
+    variables: Variables,
     last_exit_code: int,
 ) -> list[str]:
-    """Perform variable expansion and globbing on arguments.
+    """Expand braces, then variables, then glob, as bash does.
 
-    Variables expand first (so ``$?`` never reads as a glob ``?``), then
+    Variables come before globs (so ``$?`` never reads as a glob ``?``);
     fully-unquoted args containing wildcards are globbed.  An unquoted
     arg that expands to nothing is removed entirely (bash word removal:
-    ``echo a $UNSET b`` has two args, not three).
+    ``echo a $EMPTY b`` has two args, not three).
     """
     expanded: list[str] = []
     for arg in args:
-        masked, mask_map = mask_quotes(arg)
-        masked = _expand_masked(masked, mask_map, env, last_exit_code)
+        masked_arg, quoted = mask_quotes(arg)
+        for word, mask_map in _braced(masked_arg, quoted):
+            masked = _expand_masked(word, mask_map, variables, last_exit_code)
 
-        if not mask_map:
-            # Fully unquoted: word removal, then globbing
-            if masked == "" and arg != "":
-                continue
-            if has_magic(masked):
-                # bash's pathname expansion, segment by segment (see
-                # pathglob); a word that matches nothing stays as typed
-                try:
-                    matches = expand_pathname(masked, fs)
-                    expanded.extend(matches if matches else [masked])
-                except Exception:
-                    expanded.append(masked)
-                continue
+            if not mask_map:
+                # Fully unquoted: word removal, then globbing
+                if masked == "" and arg != "":
+                    continue
+                if has_magic(masked):
+                    # bash's pathname expansion, segment by segment (see
+                    # pathglob); a word that matches nothing stays as typed
+                    try:
+                        matches = expand_pathname(masked, fs)
+                        expanded.extend(matches if matches else [masked])
+                    except Exception:
+                        expanded.append(masked)
+                    continue
 
-        expanded.append(unmask_and_unquote(masked, mask_map))
+            expanded.append(unmask_and_unquote(masked, mask_map))
 
     return expanded
 

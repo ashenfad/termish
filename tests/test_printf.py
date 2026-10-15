@@ -214,8 +214,8 @@ class TestExpansion:
         out = execute(r'printf "%s\n" "$X"', fs, env={"X": "value"})
         assert out == "value\n"
 
-    def test_unset_variable_is_an_empty_argument(self, fs):
-        assert execute(r'printf "[%s]" "$NOPE"', fs) == "[]"
+    def test_empty_variable_is_an_empty_argument(self, fs):
+        assert execute(r'printf "[%s]" "$NOPE"', fs, env={"NOPE": ""}) == "[]"
 
     def test_percent_in_an_expanded_argument_is_data(self, fs):
         out = execute(r'printf "%s\n" "$X"', fs, env={"X": "50%"})
