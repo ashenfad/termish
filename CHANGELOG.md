@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Brace expansion.** `{a,b}` lists and `{1..3}`, `{a..e}`, `{01..10}`, `{1..10..2}` sequences expand before variables and globs, as in bash; a brace with nothing to expand (`{}`, `{x}`) stays literal.
+- **`$PWD`, and defaults.** `$PWD` is always the current directory, and `${NAME:-word}` / `${NAME-word}` give a default for a variable that may be unset.
+
+### Changed
+- **Breaking: an unset variable is an error.** `$NAME` with `NAME` unset stops the script with `NAME: unbound variable`, as under bash's `set -u`, so `rm -r $DIR/x` never runs as `rm -r /x`; hosts should pass `HOME`.
+- **Parse errors say where, all at once.** Each gives its line and column, every unsupported construct in a script is reported in one error, and `$((...))` and `NAME=value` get messages of their own.
+
+### Fixed
+- **An escaped operator, glob or quote is a literal.** `\;` no longer ends a command (so `find -exec cmd {} \;` works) and `\*` no longer globs, as in bash.
+
 ## [0.2.3] - 2026-10-13
 
 ### Added

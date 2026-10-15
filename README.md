@@ -59,18 +59,30 @@ output = execute("echo hello $NAME", fs, env=env)
 print(output)  # hello alice
 ```
 
-Unset variables expand to the empty string. Single quotes suppress
-expansion (`'$?'` stays literal). Command substitution `$(...)` is not
-supported and raises `ParseError` rather than mangling silently.
-Heredoc bodies are never expanded.
+An unset variable stops the script with `NAME: unbound variable`, as
+under bash's `set -u`: with no assignment in the language, every
+variable comes from the host, so an unset one is a mistake, and
+`rm -r $DIR/x` must never run as `rm -r /x`. `${NAME:-word}` and
+`${NAME-word}` give a default for one that may be unset. `$PWD` is
+always the current directory; a host should pass `HOME`. Single quotes
+suppress expansion (`'$?'` stays literal). Heredoc bodies are never
+expanded.
 
-Shell control flow is not supported either. A script whose command
-position holds `for`, `while`, `until`, `if`, `case`, one of their
-partners (`do`, `done`, `then`, `else`, `elif`, `fi`, `esac`), or a
-function definition (`function f { ... }`, `f() { ... }`) raises a
-single `ParseError` naming the word -- rather than reporting each word
-as a missing command, which is what a `for` loop used to do three
-times over. Use `xargs` or `find -exec` to iterate and `&&` / `||` for
+Braces expand before variables and globs, as in bash: `{a,b}` lists
+(`mkdir -p src/{lib,test}`) and `{1..3}`, `{a..e}`, `{01..10}`,
+`{1..10..2}` sequences. A brace with nothing to expand (`{}`, `{x}`)
+stays literal, so `find -exec cmd {} \;` keeps its `{}`.
+
+Command substitution `$(...)`, arithmetic `$((...))`, variable
+assignment (`N=3`) and shell control flow are not supported. A script
+whose command position holds `for`, `while`, `until`, `if`, `case`,
+one of their partners (`do`, `done`, `then`, `else`, `elif`, `fi`,
+`esac`), or a function definition (`function f { ... }`,
+`f() { ... }`) raises a `ParseError` naming the word -- one per block,
+rather than reporting each word as a missing command. Every unsupported
+construct in a script is reported at once, each with its line and
+column (`line 2, col 6: arithmetic expansion $((...)) is not
+supported; ...`), and nothing runs. Use `xargs` or `find -exec` to iterate and `&&` / `||` for
 conditionals, and inject anything more involved as a custom command.
 Only command position counts: `echo for`, `grep -r done .`, a file
 named `for`, and quoted `'for'` are all ordinary words. Quoting is
@@ -83,7 +95,7 @@ bash's, and it's deliberate: a value with spaces stays one argument
 (`grep $PAT file` with `PAT="a b"` searches for `a b`), and a
 multi-word command name is a visible `command not found` rather than a
 silent re-parse. An empty-expanding command word shifts away
-(`$UNSET echo hi` runs `echo hi`), also as in zsh.
+(`$EMPTY echo hi` runs `echo hi`), also as in zsh.
 
 ## Custom commands
 
