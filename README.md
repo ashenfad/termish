@@ -116,6 +116,8 @@ print(output)  # 12
 # Injected commands override builtins with the same name
 ```
 
+An injected command can describe itself with a `description` string attribute on its handler (`greet.description = "say hello"`); `help` lists it with that line, beside the builtins.
+
 All commands — builtin and injected — use the same `CommandContext` signature. See `CommandContext`, `CommandResult`, and `CommandFunc` in `termish.context` and `termish.errors`.
 
 `ctx.stdin` and `ctx.stdout` are text streams over the bytes the pipeline carries: `ctx.stdout.buffer.write(data)` emits bytes that reach the next stage or a `> file` redirect unchanged, and `ctx.stdin.buffer.read()` consumes them unchanged. Flush the text side before switching to `.buffer` on the same stream.
@@ -173,12 +175,13 @@ That is not a coincidence, and it is a promise: termish's `FileSystem` protocol 
 | Filesystem | `pwd`, `cd`, `mkdir`, `ls`, `touch`, `cp`, `mv`, `rm`, `basename`, `dirname` |
 | I/O | `echo`, `printf`, `cat`, `head`, `tail`, `tee` |
 | Search | `grep`, `find` |
-| Text | `wc`, `sort`, `uniq`, `cut`, `sed`, `tr` |
+| Text | `wc`, `sort`, `uniq`, `cut`, `sed`, `tr`, `seq`, `paste`, `comm`, `rev` |
 | Diff | `diff` |
 | Archive | `tar`, `gzip`, `gunzip`, `zcat`/`gzcat`, `zip`, `unzip` |
-| Meta | `xargs` |
+| Meta | `xargs`, `which`, `command`, `help` |
 | JSON | `jq` |
-| Inspection | `file` |
+| Inspection | `file`, `stat`, `du`, `realpath`, `md5sum`, `sha256sum` |
+| Time | `date` |
 | Control | `true`, `false`, `test` / `[` |
 
 ## Development
