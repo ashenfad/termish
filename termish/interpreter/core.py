@@ -23,7 +23,20 @@ from termish.fs import FileSystem
 from termish.quote_masker import mask_quotes, unmask_and_unquote
 
 from .brace import expand_braces, parameter_end
-from .commands import archive, conditional, control, filesystem, meta, search, text
+from .commands import (
+    archive,
+    checksum,
+    clock,
+    conditional,
+    control,
+    filesystem,
+    fsinfo,
+    info,
+    lines,
+    meta,
+    search,
+    text,
+)
 from .commands import diff as diff_cmd
 from .commands import file as file_mod
 from .commands import io as io_cmds
@@ -116,6 +129,22 @@ BUILTINS: dict[str, CommandFunc] = {
     "unzip": archive.unzip,
     # Inspection
     "file": file_mod.file_cmd,
+    "du": fsinfo.du,
+    "stat": fsinfo.stat,
+    "realpath": fsinfo.realpath,
+    "md5sum": checksum.md5sum,
+    "sha256sum": checksum.sha256sum,
+    # Lines
+    "seq": lines.seq,
+    "paste": lines.paste,
+    "comm": lines.comm,
+    "rev": lines.rev,
+    # Time
+    "date": clock.date,
+    # What's here
+    "which": info.which,
+    "command": info.command,
+    "help": info.help_cmd,
     # Control
     "true": control.true_cmd,
     "false": control.false_cmd,
