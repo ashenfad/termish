@@ -133,8 +133,8 @@ HELP: dict[str, HelpEntry] = {
         "pwd",
     ),
     "realpath": HelpEntry(
-        "print absolute, normalized paths",
-        "realpath [-e | -m] PATH...",
+        "print absolute, normalized paths (symlinks not expanded)",
+        "realpath [-e | -m] [-s] PATH...",
     ),
     "rev": HelpEntry(
         "reverse each line's characters",
