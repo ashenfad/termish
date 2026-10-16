@@ -4,7 +4,8 @@ termish-ts (``tests/cases/``), so both terminals behave alike.
 A case's ``stdout`` (or ``stdoutRegex``, searched) is what the script
 wrote, the partial output when it failed; ``error`` is a substring of
 the failure's message and stderr (a parse error's too); ``exitCode``
-the failure's code. ``files`` are written first, and the script runs in
+the failure's code (a case with a nonzero one and no ``error`` fails
+quietly). ``files`` are written first, and the script runs in
 ``cwd`` with ``env``.
 """
 
@@ -60,7 +61,8 @@ def test_case(case: dict) -> None:
     if "stdoutRegex" in case:
         assert re.search(case["stdoutRegex"], stdout), stdout
     if "error" not in case:
-        assert error is None, error
+        if case.get("exitCode", 0) == 0:
+            assert error is None, error
     else:
         assert error is not None, "the script should fail"
         if isinstance(error, ParseError):
