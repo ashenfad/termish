@@ -6,7 +6,9 @@ repeated for each (``src/{lib,test}`` is ``src/lib src/test``); lists
 nest (``{a,b{1,2}}``). It runs before variables and globs, as in bash.
 A brace with neither a top-level comma nor a sequence inside stays
 literal (``{}``, ``{x}``, so ``find -exec cmd {} \\;`` keeps its
-``{}``), and so does ``${NAME}``. Quoted text is a placeholder by now,
+``{}``), and so does a whole ``${...}`` with what's inside it
+(``${X:-a{b,c}}`` gives ``a{b,c}``), while braces after one still
+expand (``${N}{a,b}``). Quoted text is a placeholder by now,
 so a brace inside quotes never expands, nor an escaped one (the parser
 quotes it).
 """
@@ -63,9 +65,15 @@ class _Brace:
 
 def _first_brace(word: str) -> _Brace | None:
     """The leftmost brace that expands: its span and its items."""
-    start = word.find("{")
-    while start >= 0:
-        if not (start > 0 and word[start - 1] == "$"):
+    start = 0
+    while start < len(word):
+        if word.startswith("${", start):
+            # A ``${...}`` never brace-expands, nor anything inside it;
+            # one left open keeps just its own ``{`` literal.
+            close = parameter_end(word, start)
+            start = (close if close >= 0 else start + 1) + 1
+            continue
+        if word[start] == "{":
             end = _matching(word, start)
             if end >= 0:
                 inner = word[start + 1 : end]
@@ -75,8 +83,30 @@ def _first_brace(word: str) -> _Brace | None:
                 seq = _sequence(inner)
                 if seq is not None:
                     return _Brace(start, end, seq, True)
-        start = word.find("{", start + 1)
+        start += 1
     return None
+
+
+def parameter_end(text: str, dollar: int) -> int:
+    """The index of the ``}`` closing the ``${`` at ``dollar``, or -1.
+    As in bash, only a nested ``${`` pairs with a ``}`` inside one, so
+    ``${X:-a{b}c}`` ends after ``b``; a backslash keeps the character
+    after it from counting."""
+    depth = 0
+    i = dollar
+    while i < len(text):
+        c = text[i]
+        if c == "\\":
+            i += 1
+        elif text.startswith("${", i):
+            depth += 1
+            i += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return -1
 
 
 def _matching(word: str, open_: int) -> int:
@@ -116,13 +146,14 @@ _PADDED = re.compile(r"-?0[0-9]")
 
 def _sequence(inner: str) -> list[str] | None:
     """A sequence's items, or None when ``inner`` isn't one. A step's
-    sign is ignored, as in bash: the ends say which way it runs."""
+    sign is ignored, as in bash: the ends say which way it runs. The
+    ends and the step are exact integers, however long."""
     m = _NUMBERS.fullmatch(inner)
     if m is not None:
         a, b, s = m.groups()
         first, last = int(a), int(b)
         step = abs(int(s or 1)) or 1
-        if abs(last - first) / step + 1 > BRACE_LIMIT:
+        if abs(last - first) // step + 1 > BRACE_LIMIT:
             _too_many()
         # a leading zero on either end pads every item to the wider end
         width = max(len(a), len(b)) if _PADDED.match(a) or _PADDED.match(b) else 0
