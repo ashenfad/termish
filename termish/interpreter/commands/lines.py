@@ -5,8 +5,8 @@ Mirrors termish-ts's ``lines.ts``. A file's lines are its text split at
 empty one.
 """
 
-import math
 import re
+from typing import NamedTuple
 
 from termish.context import CommandContext, CommandResult
 from termish.errors import TerminalError
@@ -43,16 +43,42 @@ def _read_text(ctx: CommandContext, prog: str, path: str) -> str:
 _NUMBER_RE = re.compile(r"[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?")
 
 
-def _parse_number(text: str) -> tuple[float, int]:
-    """The number, and its digits after the decimal point as written."""
+#: The largest exponent ``seq`` takes, so ``1e999999999`` can't build a
+#: billion-digit number.
+SEQ_MAX_EXPONENT = 1000
+
+
+class _Exact(NamedTuple):
+    """A number exactly as written: ``digits`` times 10^``exp``."""
+
+    digits: int
+    exp: int
+    #: Digits after the decimal point, as written.
+    places: int
+
+
+def _parse_number(text: str) -> _Exact:
     m = _NUMBER_RE.fullmatch(text)
     if m is None:
         raise TerminalError(f"seq: invalid floating point argument: '{text}'")
     mantissa = m.group(1)
     exp = 0 if m.group(2) is None else int(m.group(2)[1:])
+    if abs(exp) > SEQ_MAX_EXPONENT:
+        raise TerminalError(f"seq: out of range: '{text}'")
     dot = mantissa.find(".")
     frac = 0 if dot == -1 else len(mantissa) - dot - 1
-    return float(text), max(0, frac - exp)
+    magnitude = int(mantissa.replace(".", "", 1) or "0")
+    return _Exact(
+        -magnitude if text.startswith("-") else magnitude,
+        exp - frac,
+        max(0, frac - exp),
+    )
+
+
+def _scale_to(x: _Exact, places: int) -> int:
+    """``x`` as an integer count of 10^-``places``; ``places`` is at least
+    ``x.places``."""
+    return x.digits * 10 ** (x.exp + places)
 
 
 def _format_scaled(n: int, places: int) -> str:
@@ -110,29 +136,31 @@ def seq(ctx: CommandContext) -> CommandResult | None:
     if len(operands) > 3:
         raise TerminalError(f"seq: extra operand '{operands[3]}'")
     nums = [_parse_number(o) for o in operands]
-    first = nums[0] if len(operands) > 1 else (1.0, 0)
-    incr = nums[1] if len(operands) == 3 else (1.0, 0)
+    one = _Exact(1, 0, 0)
+    first = nums[0] if len(operands) > 1 else one
+    incr = nums[1] if len(operands) == 3 else one
     last = nums[-1]
-    if incr[0] == 0:
+    if incr.digits == 0:
         raise TerminalError(f"seq: invalid Zero increment value: '{operands[1]}'")
 
-    places = max(first[1], incr[1])
-    scale = 10**places
-    start = _round_half_away(first[0] * scale)
-    step = _round_half_away(incr[0] * scale)
-    end = last[0] * scale
+    # Exact integers in LAST's precision too, so it compares exactly;
+    # shown with FIRST's and INCR's decimals only.
+    places = max(first.places, incr.places)
+    exact = max(places, last.places)
+    unit = 10 ** (exact - places)
+    start = _scale_to(first, exact)
+    step = _scale_to(incr, exact)
+    end = _scale_to(last, exact)
 
     def within(n: int) -> bool:
-        # A tolerance below one unit of the last decimal shown, so a LAST
-        # written with fewer decimals than the arithmetic carries counts.
-        return n <= end + 1e-9 if step > 0 else n >= end - 1e-9
+        return n <= end if step > 0 else n >= end
 
     out: list[str] = []
     n = start
     while within(n):
         if len(out) >= SEQ_MAX:
             raise TerminalError(f"seq: too many numbers (the limit is {SEQ_MAX})")
-        out.append(_format_scaled(n, places))
+        out.append(_format_scaled(n // unit, places))
         n += step
     if not out:
         return None
@@ -146,11 +174,6 @@ def seq(ctx: CommandContext) -> CommandResult | None:
         ]
     ctx.stdout.write(sep.join(out) + "\n")
     return None
-
-
-def _round_half_away(x: float) -> int:
-    """Round as JavaScript's ``Math.round`` does (half up), not to even."""
-    return math.floor(x + 0.5)
 
 
 # =============================================================================
