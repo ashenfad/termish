@@ -22,7 +22,7 @@ from termish.errors import CommandFunc, TerminalError
 from termish.fs import FileSystem
 from termish.quote_masker import mask_quotes, unmask_and_unquote
 
-from .brace import expand_braces
+from .brace import expand_braces, parameter_end
 from .commands import archive, conditional, control, filesystem, meta, search, text
 from .commands import diff as diff_cmd
 from .commands import file as file_mod
@@ -34,15 +34,11 @@ from .pathglob import expand as expand_pathname
 from .pathglob import has_magic
 
 #: The redirect target that discards: written to, nothing is kept;
-#: read from, it is empty. Never a file in the filesystem.
+#: read from, it is empty. Never a file in the filesystem. A target is
+#: compared once resolved, so ``dev/null`` from ``/`` and
+#: ``/dev/./null`` are it too (compared as spelled, they would be
+#: written as a file).
 DEV_NULL = "/dev/null"
-
-
-def _is_dev_null(target: str, fs: FileSystem) -> bool:
-    """Whether a redirect target names /dev/null, however it is spelled:
-    ``dev/null`` from ``/`` and ``/dev/./null`` are the same path, and a
-    comparison of spellings would write them as a file."""
-    return resolve_path(target, fs) == DEV_NULL
 
 
 # Context var holding injected commands for the current execution.
@@ -298,6 +294,15 @@ def _execute_pipeline(
             continue
         cmd_name, expanded_args = words[0], words[1:]
 
+        # Every redirect's target is expanded and resolved before the
+        # command runs, as in bash: an unset variable or an ambiguous
+        # target stops it before it can do anything.
+        paths: dict[int, tuple[str, str]] = {}
+        for r in cmd_node.redirects:
+            if r.type not in ("<<", "2>&1"):
+                target = _expand_word(r.target, variables, last_exit_code)
+                paths[id(r)] = (target, resolve_path(target, fs))
+
         # Handle Redirects (Input) — last input-ish redirect wins (bash)
         input_redirect = next(
             (r for r in reversed(cmd_node.redirects) if r.type in ("<", "<<")),
@@ -309,13 +314,12 @@ def _execute_pipeline(
                 # were quoted) — no expansion.
                 cmd_stdin = PipeStream((input_redirect.content or "").encode("utf-8"))
             else:
-                target = _expand_word(input_redirect.target, variables, last_exit_code)
-                if _is_dev_null(target, fs):
+                target, path = paths[id(input_redirect)]
+                if path == DEV_NULL:
                     # Reads as empty, as in bash: there is no device to
                     # open, and no file of that name should be needed.
                     cmd_stdin = PipeStream(b"")
                 else:
-                    path = resolve_path(target, fs)
                     try:
                         cmd_stdin = PipeStream(fs.read(path))
                     except Exception as e:
@@ -335,14 +339,13 @@ def _execute_pipeline(
         def write_redirects(data: bytes) -> None:
             """Write ``data`` to each of the command's output redirects."""
             for r in output_redirects:
-                target = _expand_word(r.target, variables, last_exit_code)
-                if _is_dev_null(target, fs):
+                _, path = paths[id(r)]
+                if path == DEV_NULL:
                     # Discarded, as stderr's 2>/dev/null already was.
                     # Written as a file it lands in the filesystem as
                     # /dev/null, where every later listing and diff of
                     # the tree finds it.
                     continue
-                path = resolve_path(target, fs)
                 try:
                     _write_to_file(path, data, r.type == ">>", fs)
                 except Exception as e:
@@ -438,9 +441,8 @@ def _execute_pipeline(
         else:
             # 2>file truncates (even when no stderr was produced, as in
             # bash); 2>>file appends; /dev/null discards.
-            target = _expand_word(stderr_redirect.target, variables, last_exit_code)
-            if not _is_dev_null(target, fs):
-                path = resolve_path(target, fs)
+            _, path = paths[id(stderr_redirect)]
+            if path != DEV_NULL:
                 try:
                     _write_to_file(
                         path,
@@ -488,20 +490,16 @@ def _execute_pipeline(
 
 # Variable forms recognized at expansion time.  Anything else involving
 # '$' (e.g. "$(", "$1", "$$", a trailing "grep foo$" anchor) is left
-# literal — visible non-support beats silent mangling.  The escape
-# alternatives implement the double-quote backslash rule: backslash is
-# special only before '\' or '$' (so "\d" in a regex stays "\d", while
-# "\\$NAME" is an escaped backslash followed by a live expansion).
+# literal — visible non-support beats silent mangling.  The escapes
+# implement the double-quote backslash rule: backslash is special only
+# before '\' or '$' (so "\d" in a regex stays "\d", while "\\$NAME"
+# is an escaped backslash followed by a live expansion).
 # "${NAME:-word}" and "${NAME-word}" give "word" (itself expanded) for a
 # variable that's unset ("-"), or unset or empty (":-"): the way to read
-# one that may not be set.
-_VAR_RE = re.compile(
-    r"\\\\"  # escaped backslash -> literal backslash
-    r"|\\\$"  # escaped dollar -> literal $
-    r"|\$\?"  # last exit code
-    r"|\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:?-)([^}]*))?\}"  # ${NAME}, ${NAME:-word}
-    r"|\$([A-Za-z_][A-Za-z0-9_]*)"  # $NAME
-)
+# one that may not be set.  "word" runs to the "}" that closes its "${",
+# as in bash, so it may hold another ("${A:-${B}}").
+_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_BRACED_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?:\}|(:?-))")
 
 #: A variable's value, or None when it isn't set.
 Variables = Callable[[str], "str | None"]
@@ -523,25 +521,66 @@ def _expand_vars(text: str, variables: Variables, last_exit_code: int) -> str:
     """
     if "$" not in text and "\\\\" not in text:
         return text
+    out: list[str] = []
+    i = 0
+    while i < len(text):
+        c = text[i]
+        nxt = text[i + 1 : i + 2]
+        if c == "\\" and nxt in ("\\", "$"):
+            out.append(nxt)
+            i += 2
+        elif c != "$":
+            out.append(c)
+            i += 1
+        elif nxt == "?":
+            out.append(str(last_exit_code))
+            i += 2
+        elif nxt == "{":
+            param = _expand_parameter(text, i, variables, last_exit_code)
+            if param is None:
+                out.append(c)
+                i += 1
+            else:
+                out.append(param[0])
+                i = param[1]
+        else:
+            m = _NAME_RE.match(text, i + 1)
+            if m is None:
+                out.append(c)
+                i += 1
+            else:
+                out.append(_lookup(m.group(0), variables))
+                i = m.end()
+    return "".join(out)
 
-    def repl(m: re.Match) -> str:
-        s = m.group(0)
-        if s == "\\\\":
-            return "\\"
-        if s == "\\$":
-            return "$"
-        if s == "$?":
-            return str(last_exit_code)
-        name = m.group(1) or m.group(4)
-        op, fallback = m.group(2), m.group(3)
-        value = variables(name)
-        if op is not None and (value is None or (op == ":-" and value == "")):
-            return _expand_vars(fallback or "", variables, last_exit_code)
-        if value is None:
-            raise _UnboundVariable(name)
-        return value
 
-    return _VAR_RE.sub(repl, text)
+def _expand_parameter(
+    text: str, at: int, variables: Variables, last_exit_code: int
+) -> tuple[str, int] | None:
+    """The ``${NAME}`` or ``${NAME:-word}`` at ``at`` expanded, and the
+    index after it; None for any other ``${`` form, which stays literal."""
+    m = _BRACED_RE.match(text, at)
+    if m is None:
+        return None
+    name, op = m.group(1), m.group(2)
+    if op is None:
+        return _lookup(name, variables), m.end()
+    end = parameter_end(text, at)
+    if end < 0:
+        return None
+    value = variables(name)
+    if value is None or (op == ":-" and value == ""):
+        word = text[m.end() : end]
+        return _expand_vars(word, variables, last_exit_code), end + 1
+    return value, end + 1
+
+
+def _lookup(name: str, variables: Variables) -> str:
+    """``name``'s value; ``_UnboundVariable`` when it isn't set."""
+    value = variables(name)
+    if value is None:
+        raise _UnboundVariable(name)
+    return value
 
 
 def _expand_masked(
