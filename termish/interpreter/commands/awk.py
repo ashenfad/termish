@@ -1330,6 +1330,308 @@ def _ere_to_py(src: str) -> str:
     return "".join(out)
 
 
+# A regex's `.` matches any character, newline included, as awk's does.
+_FLAGS = re.ASCII | re.DOTALL
+
+
+class _Regex:
+    """An awk ERE: the compiled pattern, and for one with alternation the
+    NFA that finds where its match ends. The engine takes the first
+    alternative that matches; awk takes the longest match at the leftmost
+    start, so ``/a|aa/`` matches all of "aa"."""
+
+    __slots__ = ("pattern", "_nfa", "_memo_text", "_memo")
+
+    def __init__(self, src: str) -> None:
+        self.pattern = re.compile(_ere_to_py(src), _FLAGS)
+        self._nfa = _nfa_for(src)
+        self._memo_text: str | None = None
+        self._memo: dict[tuple[frozenset[int], int], int] = {}
+
+    def search(self, s: str, pos: int = 0) -> tuple[int, int] | None:
+        """The leftmost match in ``s`` from ``pos``, the longest one
+        starting there: ``(start, end)``, or None."""
+        m = self.pattern.search(s, pos)
+        if m is None:
+            return None
+        start, end = m.span()
+        if self._nfa is not None:
+            # successive searches of one text (gsub, split) share what
+            # earlier runs learned about it
+            if self._memo_text is not s or len(self._memo) > _MEMO_LIMIT:
+                self._memo_text = s
+                self._memo = {}
+            end = max(end, _longest_end(self._nfa, s, start, self._memo))
+        return start, end
+
+
+# NFA instructions: (op, ...), run by _longest_end
+_CHAR, _SPLIT, _JMP, _BOL, _EOL, _MATCH = range(6)
+_NFA_LIMIT = 10_000
+_MEMO_LIMIT = 100_000
+_INTERVAL = re.compile(r"\{(\d+)(,(\d*))?\}")
+_LITERAL_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "f": "\f", "v": "\v"}
+
+
+class _Unsupported(Exception):
+    """A construct the NFA doesn't model: the engine's match is kept."""
+
+
+def _bracket_end(src: str, i: int) -> int:
+    """One past the ``]`` closing the bracket expression at ``src[i]``,
+    scanned as ``_ere_to_py`` scans it."""
+    n = len(src)
+    i += 1
+    if src[i : i + 1] == "^":
+        i += 1
+    if src[i : i + 1] == "]":
+        i += 1
+    while i < n and src[i] != "]":
+        if src[i] == "[" and src[i + 1 : i + 2] == ":":
+            end = src.find(":]", i + 2)
+            if end != -1 and src[i + 2 : end] in _POSIX_CLASSES:
+                i = end + 2
+                continue
+        i += 2 if src[i] == "\\" and i + 1 < n else 1
+    return min(i + 1, n)
+
+
+class _EreParser:
+    """An ERE read into a tree: ("lit", c) ("set", test) ("bol",) ("eol",)
+    ("cat", nodes) ("alt", nodes) ("rep", node, lo, hi or None)."""
+
+    def __init__(self, src: str) -> None:
+        self.src = src
+        self.i = 0
+        self.has_alt = False
+
+    def parse(self) -> tuple:
+        node = self._alt()
+        if self.i < len(self.src):
+            raise _Unsupported()
+        return node
+
+    def _peek(self) -> str:
+        return self.src[self.i : self.i + 1]
+
+    def _alt(self) -> tuple:
+        branches = [self._concat()]
+        while self._peek() == "|":
+            self.i += 1
+            self.has_alt = True
+            branches.append(self._concat())
+        return ("alt", branches) if len(branches) > 1 else branches[0]
+
+    def _concat(self) -> tuple:
+        items = []
+        while self._peek() not in ("", "|", ")"):
+            items.append(self._repeat())
+        return ("cat", items)
+
+    def _repeat(self) -> tuple:
+        node = self._atom()
+        while True:
+            c = self._peek()
+            if c in ("*", "+", "?"):
+                self.i += 1
+                node = ("rep", node, 1 if c == "+" else 0, 1 if c == "?" else None)
+            elif c == "{":
+                m = _INTERVAL.match(self.src, self.i)
+                if m is None:
+                    raise _Unsupported()
+                lo = int(m[1])
+                hi = lo if m[2] is None else (int(m[3]) if m[3] else None)
+                if hi is not None and hi < lo:
+                    raise _Unsupported()
+                self.i = m.end()
+                node = ("rep", node, lo, hi)
+            else:
+                return node
+
+    def _atom(self) -> tuple:
+        src = self.src
+        c = src[self.i]
+        if c == "(":
+            if src.startswith("(?", self.i):
+                raise _Unsupported()
+            self.i += 1
+            node = self._alt()
+            if self._peek() != ")":
+                raise _Unsupported()
+            self.i += 1
+            return node
+        if c in "*+?{)":
+            raise _Unsupported()
+        if c == ".":
+            self.i += 1
+            return ("set", lambda _c: True)
+        if c == "^":
+            self.i += 1
+            return ("bol",)
+        if c == "$":
+            self.i += 1
+            return ("eol",)
+        if c == "[":
+            j = _bracket_end(src, self.i)
+            test = re.compile(_ere_to_py(src[self.i : j]), _FLAGS).fullmatch
+            self.i = j
+            return ("set", lambda ch: test(ch) is not None)
+        if c == "\\":
+            d = src[self.i + 1 : self.i + 2]
+            if d == "":
+                raise _Unsupported()
+            if d in _LITERAL_ESCAPES:
+                node: tuple = ("lit", _LITERAL_ESCAPES[d])
+            elif d in "dDwWsS":
+                test = re.compile(src[self.i : self.i + 2], _FLAGS).fullmatch
+                node = ("set", lambda ch: test(ch) is not None)
+            elif d.isascii() and d.isalnum():
+                raise _Unsupported()
+            else:
+                node = ("lit", d)
+            self.i += 2
+            return node
+        self.i += 1
+        return ("lit", c)
+
+
+def _nfa_for(src: str) -> list[tuple] | None:
+    """The NFA program for an ERE with alternation; None for one without,
+    whose engine match is kept as it is, and for one the NFA can't model."""
+    if "|" not in src:
+        return None
+    parser = _EreParser(src)
+    try:
+        tree = parser.parse()
+    except (_Unsupported, re.error):
+        return None
+    if not parser.has_alt:
+        return None
+    ops: list = []
+
+    def emit(node: tuple) -> None:
+        kind = node[0]
+        if kind == "lit":
+            ops.append((_CHAR, node[1].__eq__))
+        elif kind == "set":
+            ops.append((_CHAR, node[1]))
+        elif kind == "bol":
+            ops.append((_BOL,))
+        elif kind == "eol":
+            ops.append((_EOL,))
+        elif kind == "cat":
+            for x in node[1]:
+                emit(x)
+        elif kind == "alt":
+            jumps = []
+            branches = node[1]
+            for b in branches[:-1]:
+                split = len(ops)
+                ops.append(None)
+                emit(b)
+                jumps.append(len(ops))
+                ops.append(None)
+                ops[split] = (_SPLIT, split + 1, len(ops))
+            emit(branches[-1])
+            for j in jumps:
+                ops[j] = (_JMP, len(ops))
+        else:
+            _, x, lo, hi = node
+            for _ in range(lo):
+                emit(x)
+            if hi is None:
+                loop = len(ops)
+                ops.append(None)
+                emit(x)
+                ops.append((_JMP, loop))
+                ops[loop] = (_SPLIT, loop + 1, len(ops))
+            else:
+                holes = []
+                for _ in range(hi - lo):
+                    holes.append(len(ops))
+                    ops.append(None)
+                    emit(x)
+                for h in holes:
+                    ops[h] = (_SPLIT, h + 1, len(ops))
+        if len(ops) > _NFA_LIMIT:
+            raise _Unsupported()
+
+    try:
+        emit(tree)
+    except _Unsupported:
+        return None
+    ops.append((_MATCH,))
+    return ops
+
+
+def _longest_end(
+    ops: list[tuple], s: str, start: int, memo: dict[tuple[frozenset[int], int], int]
+) -> int:
+    """The furthest end of a match of the NFA ``ops`` starting at
+    ``start`` in ``s``, or -1. All paths advance together, a character at
+    a time, and the run stops when none is left. The live set at a
+    position decides everything after it, so ``memo`` keeps, for each
+    (live set, position) a run of ``s`` passed through, the furthest end
+    from there, and a later run that reaches one stops at once: searches
+    from many starts in one text read it about once, not once each."""
+    n = len(s)
+
+    def close(out: list[int], seen: set[int], pc: int, pos: int) -> None:
+        stack = [pc]
+        while stack:
+            pc = stack.pop()
+            if pc in seen:
+                continue
+            seen.add(pc)
+            op = ops[pc]
+            kind = op[0]
+            if kind == _SPLIT:
+                stack.append(op[2])
+                stack.append(op[1])
+            elif kind == _JMP:
+                stack.append(op[1])
+            elif kind == _BOL:
+                if pos == 0:
+                    stack.append(pc + 1)
+            elif kind == _EOL:
+                if pos == n:
+                    stack.append(pc + 1)
+            else:
+                out.append(pc)
+
+    path: list[tuple[frozenset[int], int, bool]] = []
+    best = -1
+    live: list[int] = []
+    close(live, set(), 0, start)
+    pos = start
+    while live:
+        state = frozenset(live)
+        known = memo.get((state, pos))
+        if known is not None:
+            best = known
+            break
+        c = s[pos] if pos < n else None
+        nxt: list[int] = []
+        seen: set[int] = set()
+        accepts = False
+        for pc in live:
+            op = ops[pc]
+            if op[0] == _MATCH:
+                accepts = True
+            elif c is not None and op[1](c):
+                close(nxt, seen, pc + 1, pos + 1)
+        path.append((state, pos, accepts))
+        if c is None:
+            break
+        live = nxt
+        pos += 1
+    for state, at, accepts in reversed(path):
+        if accepts and best < at:
+            best = at
+        memo[(state, at)] = best
+    return best
+
+
 # ---------------------------------------------------------------------------
 # Interpreter
 # ---------------------------------------------------------------------------
@@ -1346,7 +1648,7 @@ class _Interp:
     def __init__(self, ctx: CommandContext) -> None:
         self._ctx = ctx
         self._vars: dict[str, Val | AwkArray] = {}
-        self._regexes: dict[str, re.Pattern[str]] = {}
+        self._regexes: dict[str, _Regex] = {}
         self._record = ""
         self._fields: list[str] = []
         self._out: list[str] = []
@@ -1461,12 +1763,12 @@ class _Interp:
         self._fields[i - 1] = text
         self._rebuild()
 
-    def split(self, s: str, sep: Val | re.Pattern[str]) -> list[str]:
+    def split(self, s: str, sep: Val | _Regex) -> list[str]:
         """``s`` split as fields are: on runs of blanks for " ", on a single
         character literally, into characters for "", on a regex otherwise."""
         if s == "":
             return []
-        if isinstance(sep, re.Pattern):
+        if isinstance(sep, _Regex):
             return self._split_regex(s, sep)
         fs = self._str(sep)
         if fs == " ":
@@ -1482,36 +1784,39 @@ class _Interp:
             return s.split(fs)
         return self._split_regex(s, self._regex(fs))
 
-    def _split_regex(self, s: str, pattern: re.Pattern[str]) -> list[str]:
+    def _split_regex(self, s: str, rx: _Regex) -> list[str]:
+        """``s`` split at each non-empty match of ``rx``; the separators,
+        groups and all, are dropped."""
         out: list[str] = []
         pos = 0
         frm = 0
         while frm <= len(s):
-            m = pattern.search(s, frm)
+            m = rx.search(s, frm)
             if m is None:
                 break
-            if m.end() == m.start():
-                frm = m.start() + 1
+            start, end = m
+            if end == start:
+                frm = start + 1
                 continue
-            out.append(s[pos : m.start()])
-            pos = m.end()
+            out.append(s[pos:start])
+            pos = end
             frm = pos
         out.append(s[pos:])
         return out
 
     # -- regexes ------------------------------------------------------------
 
-    def _regex(self, src: str) -> re.Pattern[str]:
-        pattern = self._regexes.get(src)
-        if pattern is None:
+    def _regex(self, src: str) -> _Regex:
+        rx = self._regexes.get(src)
+        if rx is None:
             try:
-                pattern = re.compile(_ere_to_py(src), re.ASCII)
+                rx = _Regex(src)
             except re.error:
                 raise AwkRuntimeError(f"awk: invalid regex: /{src}/") from None
-            self._regexes[src] = pattern
-        return pattern
+            self._regexes[src] = rx
+        return rx
 
-    def _regex_of(self, e: Expr) -> re.Pattern[str]:
+    def _regex_of(self, e: Expr) -> _Regex:
         """A regex argument: a ``/re/`` literal as itself, anything else as
         the text of one."""
         if e[0] == "ere":
@@ -1520,14 +1825,35 @@ class _Interp:
 
     # -- lvalues ------------------------------------------------------------
 
-    def _set(self, target: Expr, v: Val) -> None:
+    def _ref(self, target: Expr) -> tuple:
+        """Where an lvalue points, its subscripts and field number evaluated
+        once: ("var", name), ("idx", array, key) or ("field", i)."""
         kind = target[0]
-        if kind == "var":
-            self.set_scalar(target[1], v)
-        elif kind == "idx":
-            self.array(target[1])[self._key(target[2])] = v
+        if kind == "idx":
+            return ("idx", self.array(target[1]), self._key(target[2]))
+        if kind == "field":
+            return ("field", int(_trunc(_to_num(self.eval(target[1])))))
+        return ("var", target[1])
+
+    def _load(self, ref: tuple) -> Val:
+        kind = ref[0]
+        if kind == "idx":
+            arr, key = ref[1], ref[2]
+            if key not in arr:
+                arr[key] = UNINIT
+            return arr[key]
+        if kind == "field":
+            return self._get_field(ref[1])
+        return self._scalar(ref[1])
+
+    def _store(self, ref: tuple, v: Val) -> None:
+        kind = ref[0]
+        if kind == "idx":
+            ref[1][ref[2]] = v
         elif kind == "field":
-            self._set_field(int(_trunc(_to_num(self.eval(target[1])))), v)
+            self._set_field(ref[1], v)
+        else:
+            self.set_scalar(ref[1], v)
 
     # -- expressions --------------------------------------------------------
 
@@ -1538,7 +1864,7 @@ class _Interp:
         if t == "str":
             return e[1]
         if t == "ere":
-            return 1.0 if self._regex(e[1]).search(self._record) else 0.0
+            return 1.0 if self._regex(e[1]).pattern.search(self._record) else 0.0
         if t == "group":
             return self.eval(e[1])
         if t == "var":
@@ -1553,14 +1879,16 @@ class _Interp:
         if t == "field":
             return self._get_field(int(_trunc(_to_num(self.eval(e[1])))))
         if t == "assign":
+            # the target first, then the value, as awk orders them
             _, op, target, rhs_e = e
+            ref = self._ref(target)
             if op == "=":
                 v = self.eval(rhs_e)
-                self._set(target, v)
+                self._store(ref, v)
                 return v
             rhs = _to_num(self.eval(rhs_e))
-            n = _arith(op[:-1], _to_num(self.eval(target)), rhs)
-            self._set(target, n)
+            n = _arith(op[:-1], _to_num(self._load(ref)), rhs)
+            self._store(ref, n)
             return n
         if t == "cond":
             return self.eval(e[2]) if _is_true(self.eval(e[1])) else self.eval(e[3])
@@ -1578,7 +1906,7 @@ class _Interp:
         if t == "match":
             _, neg, a, re_e = e
             s = self._str(self.eval(a))
-            hit = self._regex_of(re_e).search(s) is not None
+            hit = self._regex_of(re_e).pattern.search(s) is not None
             return 1.0 if hit != neg else 0.0
         if t == "cmp":
             return 1.0 if self._compare(e[1], self.eval(e[2]), self.eval(e[3])) else 0.0
@@ -1594,9 +1922,10 @@ class _Interp:
             return 0.0 if _is_true(self.eval(e[1])) else 1.0
         if t == "incr":
             _, op, prefix, target = e
-            old = _to_num(self.eval(target))
+            ref = self._ref(target)
+            old = _to_num(self._load(ref))
             now = old + 1 if op == "++" else old - 1
-            self._set(target, now)
+            self._store(ref, now)
             return now if prefix else old
         if t == "call":
             return self._call(e[1], e[2])
@@ -1659,7 +1988,7 @@ class _Interp:
         if name == "split":
             s = self._str(arg(0))
             target = self.array(args[1][1])
-            sep: Val | re.Pattern[str] = self._scalar("FS")
+            sep: Val | _Regex = self._scalar("FS")
             if len(args) == 3:
                 a = args[2]
                 sep = self._regex(a[1]) if a[0] == "ere" else self.eval(a)
@@ -1669,21 +1998,21 @@ class _Interp:
                 target[str(i + 1)] = StrNum(p)
             return float(len(parts))
         if name in ("sub", "gsub"):
-            pattern = self._regex_of(args[0])
+            rx = self._regex_of(args[0])
             repl = self._str(arg(1))
-            tgt: Expr = args[2] if len(args) == 3 else ("field", ("num", 0.0))
+            ref = self._ref(args[2]) if len(args) == 3 else ("field", 0)
             text, count = _substitute(
-                pattern, repl, self._str(self.eval(tgt)), name == "gsub"
+                rx, repl, self._str(self._load(ref)), name == "gsub"
             )
             if count > 0:
-                self._set(tgt, text)
+                self._store(ref, text)
             return float(count)
         if name == "match":
             s = self._str(arg(0))
             m = self._regex_of(args[1]).search(s)
-            start = 0.0 if m is None else float(m.start() + 1)
+            start = 0.0 if m is None else float(m[0] + 1)
             self._vars["RSTART"] = start
-            self._vars["RLENGTH"] = -1.0 if m is None else float(m.end() - m.start())
+            self._vars["RLENGTH"] = -1.0 if m is None else float(m[1] - m[0])
             return start
         if name == "sprintf":
             return _format_printf(
@@ -1872,7 +2201,7 @@ class _Interp:
 
         if code is None and (mains or ends):
             try:
-                self._read_input(mains, operands)
+                self._read_input(mains)
             except _Exit as e:
                 code = e.code if e.code is not None else 0
 
@@ -1890,42 +2219,55 @@ class _Interp:
         name, _, value = a.partition("=")
         self.set_scalar(name, StrNum(read_escapes(value)))
 
-    def _read_input(self, mains: list[Item], operands: list[str]) -> None:
-        # with no file named, stdin is read after the assignments
-        files = [o for o in operands if not _is_assignment(o)]
-        sources = operands + ["-"] if not files else operands
-        for src in sources:
+    def _read_input(self, mains: list[Item]) -> None:
+        """Read the operands in ARGV[1] to ARGV[ARGC-1], as they stand when
+        each is reached: a missing or empty one is skipped, ``var=value``
+        assigns, and stdin is read when none names a file."""
+        i = 1
+        read = False
+        while i < _to_num(self._scalar("ARGC")):
+            v = self.array("ARGV").get(str(i))
+            i += 1
+            src = "" if v is None else self._str(v)
+            if src == "":
+                continue
             if _is_assignment(src):
                 self._assign_arg(src)
                 continue
-            if src in ("-", "/dev/stdin"):
-                text = self._ctx.stdin.read()
-            else:
-                try:
-                    data = self._ctx.fs.read(src)
-                except OSError as e:
-                    raise AwkRuntimeError(
-                        f"awk: can't open file {src}: {_describe(e)}"
-                    ) from None
-                text = data.decode("utf-8", errors="replace")
-            self._vars["FILENAME"] = "" if src == "-" else src
-            self._vars["FNR"] = 0.0
-            for record in self._records(text):
-                self._vars["NR"] = _to_num(self._scalar("NR")) + 1
-                self._vars["FNR"] = _to_num(self._scalar("FNR")) + 1
-                self.set_record(record)
-                try:
-                    for item in mains:
-                        if not self._matches(item):
-                            continue
-                        if item.action is None:
-                            self._out.append(
-                                self._record + self._str2(self._scalar("ORS"))
-                            )
-                        else:
-                            self.exec(item.action)
-                except _Next:
-                    pass
+            read = True
+            self._read_source(mains, src, src)
+        if not read:
+            self._read_source(mains, "-", "")
+
+    def _read_source(self, mains: list[Item], src: str, filename: str) -> None:
+        if src in ("-", "/dev/stdin"):
+            text = self._ctx.stdin.read()
+        else:
+            try:
+                data = self._ctx.fs.read(src)
+            except OSError as e:
+                raise AwkRuntimeError(
+                    f"awk: can't open file {src}: {_describe(e)}"
+                ) from None
+            text = data.decode("utf-8", errors="replace")
+        # FILENAME is "" for stdin read because no file was named, and
+        # the operand itself, "-" included, otherwise
+        self._vars["FILENAME"] = filename
+        self._vars["FNR"] = 0.0
+        for record in self._records(text):
+            self._vars["NR"] = _to_num(self._scalar("NR")) + 1
+            self._vars["FNR"] = _to_num(self._scalar("FNR")) + 1
+            self.set_record(record)
+            try:
+                for item in mains:
+                    if not self._matches(item):
+                        continue
+                    if item.action is None:
+                        self._out.append(self._record + self._str2(self._scalar("ORS")))
+                    else:
+                        self.exec(item.action)
+            except _Next:
+                pass
 
     def _records(self, text: str) -> Iterator[str]:
         rs = self._str2(self._scalar("RS"))
@@ -1937,13 +2279,13 @@ class _Interp:
             for p in paras:
                 yield re.sub(r"\n+$", "", p)
             return
-        parts = text.split(rs) if len(rs) == 1 else self._split_all(text, rs)
+        if len(rs) == 1:
+            parts = text.split(rs)
+        else:
+            parts = self._split_regex(text, self._regex(rs))
         if parts and parts[-1] == "":
             parts.pop()
         yield from parts
-
-    def _split_all(self, text: str, rs: str) -> list[str]:
-        return self._regex(rs).split(text)
 
     def _matches(self, item: Item) -> bool:
         if item.pattern is None:
@@ -1959,11 +2301,15 @@ class _Interp:
         return True
 
     def flush(self) -> None:
-        """Write what the run printed: stdout, then the files it printed to."""
+        """Write what the run printed: stdout, then each file it printed to,
+        once; a file that can't be written doesn't keep the rest from
+        being written, and the first failure is raised after them."""
         if self._out:
             self._ctx.stdout.write("".join(self._out))
         self._out = []
-        for path, out in self._files.items():
+        files, self._files = self._files, {}
+        failure: AwkRuntimeError | None = None
+        for path, out in files.items():
             try:
                 self._ctx.fs.write(
                     path,
@@ -1971,10 +2317,12 @@ class _Interp:
                     "w" if out.base == "truncate" else "a",
                 )
             except OSError as e:
-                raise AwkRuntimeError(
-                    f"awk: can't write to {path}: {_describe(e)}"
-                ) from None
-        self._files = {}
+                if failure is None:
+                    failure = AwkRuntimeError(
+                        f"awk: can't write to {path}: {_describe(e)}"
+                    )
+        if failure is not None:
+            raise failure
 
     @property
     def stderr(self) -> str:
@@ -2028,9 +2376,7 @@ def _pow(a: float, b: float) -> float:
         return -math.inf if a < 0 and odd else math.inf
 
 
-def _substitute(
-    pattern: re.Pattern[str], repl: str, s: str, global_: bool
-) -> tuple[str, int]:
+def _substitute(rx: _Regex, repl: str, s: str, global_: bool) -> tuple[str, int]:
     """``sub``/``gsub`` on ``s``: the text after, and how many matches were
     replaced. In ``repl``, ``&`` is the match and ``\\&`` a literal ``&``; an
     empty match right after a replaced one is skipped, as awk skips it."""
@@ -2040,18 +2386,18 @@ def _substitute(
     last_end = -1
     n = len(s)
     while pos <= n:
-        m = pattern.search(s, pos)
+        m = rx.search(s, pos)
         if m is None:
             break
-        at = m.start()
-        length = m.end() - m.start()
+        at, end = m
+        length = end - at
         if length == 0 and at == last_end:
             if at >= n:
                 break
             out.append(s[at])
             pos = at + 1
             continue
-        out.append(s[pos:at] + _expand_repl(repl, m.group(0)))
+        out.append(s[pos:at] + _expand_repl(repl, s[at:end]))
         count += 1
         last_end = at + length
         if length == 0:
