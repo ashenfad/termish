@@ -19,7 +19,15 @@ class TerminalError(Exception):
     means the message itself is the diagnostic (the common case for
     builtin errors like ``cat: /missing: No such file or directory``),
     a non-empty string is the failing handler's own stderr verbatim,
-    and ``""`` means the command failed silently (e.g. ``false``).
+    and ``""`` means nothing reached the screen: the command failed
+    silently (e.g. ``false``, or ``grep`` with no match) or its stderr
+    was redirected (``2>&1``, ``2>/dev/null``, ``2>file``).
+
+    ``message`` always describes the failure, even a silent one
+    (``grep: exited with code 1``). A handler's own stderr appears in it
+    once, prefixed with the command's name only when it doesn't already
+    start with it. To show a failure the way a terminal would, use
+    ``display_stderr``.
     """
 
     def __init__(
@@ -34,6 +42,16 @@ class TerminalError(Exception):
         self.exit_code = exit_code
         self.stderr = stderr
         super().__init__(message)
+
+    @property
+    def display_stderr(self) -> str:
+        """The stderr a terminal shows for this failure.
+
+        ``""`` when the command failed silently or its stderr was
+        redirected; otherwise ``message``, the diagnostic as it reached
+        the screen.
+        """
+        return "" if self.stderr == "" else self.message
 
 
 # Command function signature:

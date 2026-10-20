@@ -288,3 +288,133 @@ class TestRetrospectiveSpiral:
             commands={"curl": _curl},
         )
         assert out == '{"status":"ok"}\n=== EXIT 0 ===\n'
+
+
+class TestDisplayStderr:
+    """A failed script's ``display_stderr`` is what reached stderr
+    unredirected: the final command's own diagnostic, named once, or
+    nothing when it failed silently or its stderr went elsewhere."""
+
+    MISSING = "ls: cannot access '/nope': No such file or directory"
+
+    @pytest.fixture
+    def fs(self):
+        fs = MemoryFS()
+        fs.makedirs("/w")
+        fs.write("/w/f.txt", b"hello\n")
+        fs.write("/w/out.txt", b"old\n")
+        return fs
+
+    def _fail(self, script, fs, **kw) -> TerminalError:
+        with pytest.raises(TerminalError) as exc_info:
+            execute(script, fs, **kw)
+        return exc_info.value
+
+    def test_self_prefixed_stderr_is_not_prefixed_again(self, fs):
+        # ls with several operands returns its own "ls: ..." stderr
+        e = self._fail("ls /w /nope", fs)
+        assert e.exit_code == 2
+        assert e.partial_output == "/w:\nf.txt\nout.txt\n"
+        assert e.stderr == self.MISSING + "\n"
+        assert e.message == self.MISSING + "\n"
+        assert e.display_stderr == self.MISSING + "\n"
+
+    def test_unprefixed_stderr_gets_the_name(self, fs):
+        def tool(ctx: CommandContext) -> CommandResult | None:
+            return CommandResult(exit_code=2, stderr="usage: tool <path>")
+
+        e = self._fail("tool", fs, commands={"tool": tool})
+        assert e.stderr == "usage: tool <path>"
+        assert e.message == "tool: usage: tool <path>"
+        assert e.display_stderr == "tool: usage: tool <path>"
+
+    def test_a_name_inside_the_text_is_not_a_prefix(self, fs):
+        def tool(ctx: CommandContext) -> CommandResult | None:
+            return CommandResult(exit_code=1, stderr="toolbox: broken")
+
+        e = self._fail("tool", fs, commands={"tool": tool})
+        assert e.display_stderr == "tool: toolbox: broken"
+
+    def test_message_only_failure_displays_its_message(self, fs):
+        e = self._fail("cat /nope", fs)
+        assert e.stderr is None
+        assert e.display_stderr == "cat: /nope: No such file or directory"
+
+    def test_merged_into_stdout(self, fs):
+        e = self._fail("ls /w /nope 2>&1", fs)
+        assert e.exit_code == 2
+        # once, in the transcript, where 2>&1 sent it
+        assert e.partial_output == f"/w:\nf.txt\nout.txt\n{self.MISSING}\n"
+        assert e.stderr == ""
+        assert e.display_stderr == ""
+
+    def test_discarded(self, fs):
+        e = self._fail("ls /w /nope 2>/dev/null", fs)
+        assert e.exit_code == 2
+        assert e.partial_output == "/w:\nf.txt\nout.txt\n"
+        assert e.display_stderr == ""
+
+    def test_written_to_a_file(self, fs):
+        e = self._fail("ls /w /nope 2>/w/err.txt", fs)
+        assert e.exit_code == 2
+        assert e.display_stderr == ""
+        assert fs.read("/w/err.txt").decode() == self.MISSING + "\n"
+
+    def test_grep_without_a_match_is_silent(self, fs):
+        for script in ("grep zebra /w/f.txt", "cd /w && grep -r zebra ."):
+            e = self._fail(script, fs)
+            assert e.exit_code == 1
+            assert e.stderr == ""
+            assert e.display_stderr == ""
+            assert e.message == "grep: exited with code 1"
+
+    def test_test_false_is_silent(self, fs):
+        e = self._fail("test -f /nope", fs)
+        assert e.exit_code == 1
+        assert e.display_stderr == ""
+
+    def test_handler_returning_no_stderr_is_silent(self, fs):
+        def quiet(ctx: CommandContext) -> CommandResult | None:
+            return CommandResult(exit_code=3, stderr=None)  # type: ignore[arg-type]
+
+        e = self._fail("quiet", fs, commands={"quiet": quiet})
+        assert e.exit_code == 3
+        assert e.stderr == ""
+        assert e.display_stderr == ""
+
+    def test_earlier_failure_stays_in_the_transcript(self, fs):
+        e = self._fail("cat /a; echo mid; ls /w /nope", fs)
+        assert e.partial_output == (
+            "cat: /a: No such file or directory\nmid\n/w:\nf.txt\nout.txt\n"
+        )
+        assert e.display_stderr == self.MISSING + "\n"
+
+    def test_earlier_failure_then_a_silent_one(self, fs):
+        e = self._fail("ls /w /nope; grep zebra /w/f.txt", fs)
+        assert e.exit_code == 1
+        assert e.partial_output == f"/w:\nf.txt\nout.txt\n{self.MISSING}\n"
+        assert e.display_stderr == ""
+
+    def test_parse_error_is_unchanged(self, fs):
+        from termish import ParseError
+
+        with pytest.raises(ParseError):
+            execute("echo $(pwd)", fs)
+
+    def test_xargs_names_its_command_once(self, fs):
+        e = self._fail("echo /w /nope | xargs ls", fs)
+        assert e.exit_code == 2
+        assert e.display_stderr == self.MISSING + "\n"
+
+    def test_xargs_shows_earlier_warnings_and_no_invented_text(self, fs):
+        calls = []
+
+        def warn(ctx: CommandContext) -> CommandResult | None:
+            calls.append(ctx.args)
+            if len(calls) == 1:
+                return CommandResult(stderr="warn: careful\n")
+            return CommandResult(exit_code=1, stderr="")
+
+        e = self._fail("echo a b | xargs -n 1 warn", fs, commands={"warn": warn})
+        assert e.exit_code == 1
+        assert e.display_stderr == "warn: careful\n"
