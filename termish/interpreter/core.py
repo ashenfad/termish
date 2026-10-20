@@ -17,7 +17,7 @@ import re
 from collections.abc import Callable, Mapping
 
 from termish.ast import Pipeline, Script
-from termish.context import CommandContext, PipeStream
+from termish.context import CommandContext, CommandResult, PipeStream
 from termish.errors import CommandFunc, TerminalError
 from termish.fs import FileSystem
 from termish.quote_masker import mask_quotes, unmask_and_unquote
@@ -74,6 +74,25 @@ class _UnboundVariable(TerminalError):
 def result_stderr(result: object) -> str:
     """A command result's stderr text, or "" for none or no result."""
     return getattr(result, "stderr", "") or ""
+
+
+def command_failure(name: str, result: CommandResult) -> TerminalError:
+    """The error for a command ``name`` whose ``result`` has a nonzero exit.
+
+    Its stderr is kept verbatim; the message is that stderr prefixed with
+    ``name: `` unless the command already began it with its name (``ls:
+    cannot access ...``), so the name is never doubled. A command that
+    failed silently keeps ``stderr == ""``, and its message only says how
+    it exited.
+    """
+    err = result_stderr(result)
+    if not err:
+        message = f"{name}: exited with code {result.exit_code}"
+    elif err.startswith(f"{name}:"):
+        message = err
+    else:
+        message = f"{name}: {err}"
+    return TerminalError(message, exit_code=result.exit_code, stderr=err)
 
 
 def _resolve_command(name: str) -> CommandFunc | None:
@@ -427,13 +446,7 @@ def _execute_pipeline(
             # prints 0. A failure with a diagnostic still stops it.
             silent_mid = stage != last_stage and not result_stderr(result)
             if result is not None and result.exit_code != 0 and not silent_mid:
-                raise TerminalError(
-                    f"{cmd_name}: {result.stderr}"
-                    if result.stderr
-                    else f"{cmd_name}: exited with code {result.exit_code}",
-                    exit_code=result.exit_code,
-                    stderr=result.stderr,
-                )
+                raise command_failure(cmd_name, result)
         except TerminalError as e:
             if stderr_redirect is None:
                 drain_partial()

@@ -27,7 +27,7 @@ def dispatch_argv(argv: list[str], fs: FileSystem, env: dict[str, str]) -> Dispa
     raises.
     """
     # Deferred: core imports the command modules that import this one.
-    from termish.interpreter.core import _resolve_command
+    from termish.interpreter.core import _resolve_command, command_failure
 
     name, *args = argv
     func = _resolve_command(name)
@@ -44,13 +44,7 @@ def dispatch_argv(argv: list[str], fs: FileSystem, env: dict[str, str]) -> Dispa
     except Exception as e:
         raise TerminalError(f"{name}: execution error: {e}")
     if result is not None and result.exit_code != 0:
-        raise TerminalError(
-            f"{name}: {result.stderr}"
-            if result.stderr
-            else f"{name}: exited with code {result.exit_code}",
-            exit_code=result.exit_code,
-            stderr=result.stderr,
-        )
+        raise command_failure(name, result)
     return Dispatched(stdout.getvalue(), result.stderr if result is not None else "")
 
 

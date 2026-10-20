@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`TerminalError.display_stderr`.** The stderr a terminal would show for the failure: the final command's diagnostic, or `""` when it failed silently or its stderr was redirected (`2>&1`, `2>/dev/null`, `2>file`).
 - **Brace expansion.** `{a,b}` lists and `{1..3}`, `{a..e}`, `{01..10}`, `{1..10..2}` sequences expand before variables and globs, as in bash; a brace with nothing to expand (`{}`, `{x}`) stays literal.
 - **`$PWD`, and defaults.** `$PWD` is always the current directory, and `${NAME:-word}` / `${NAME-word}` give a default for a variable that may be unset.
 - **Small commands:** `date`, `seq`, `du`, `stat`, `realpath`, `paste`, `comm`, `rev`, `md5sum`/`sha256sum`, `which`, `command` and `help`, which lists every command (an injected one's too, by its `description`) and shows how one is used.
@@ -18,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Parse errors say where, all at once.** Each gives its line and column, every unsupported construct in a script is reported in one error, and `$((...))` and `NAME=value` get messages of their own.
 
 ### Fixed
+- **A failed command's name appears once.** A command whose stderr already starts with its name (`ls: cannot access ...`) no longer fails with `ls: ls: cannot access ...`; stderr without the name still gets it.
 - **An escaped operator, glob or quote is a literal.** `\;` no longer ends a command (so `find -exec cmd {} \;` works) and `\*` no longer globs, as in bash.
 
 ## [0.2.3] - 2026-10-13

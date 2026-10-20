@@ -145,7 +145,7 @@ def xargs(ctx: CommandContext) -> CommandResult | None:
             raise
         # the warnings of the runs before it are shown too
         raise TerminalError(
-            e.message,
+            join_stderr([*warnings, e.display_stderr]),
             exit_code=e.exit_code,
             stderr=join_stderr([*warnings, stderr_of(e)]),
         )
