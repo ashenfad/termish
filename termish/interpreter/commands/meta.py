@@ -143,11 +143,14 @@ def xargs(ctx: CommandContext) -> CommandResult | None:
     except TerminalError as e:
         if not warnings:
             raise
-        # the warnings of the runs before it are shown too
+        # The warnings of the runs before it are shown too. The message
+        # still names the failure (a silent one included); the screen
+        # shows only what reached stderr.
         raise TerminalError(
-            join_stderr([*warnings, e.display_stderr]),
+            join_stderr([*warnings, e.message]),
             exit_code=e.exit_code,
             stderr=join_stderr([*warnings, stderr_of(e)]),
+            display_stderr=join_stderr([*warnings, e.display_stderr]),
         )
     if warnings:
         return CommandResult(stderr=join_stderr(warnings))
