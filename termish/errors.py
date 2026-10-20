@@ -36,21 +36,28 @@ class TerminalError(Exception):
         partial_output: str = "",
         exit_code: int = 1,
         stderr: str | None = None,
+        display_stderr: str | None = None,
     ):
         self.message = message
         self.partial_output = partial_output
         self.exit_code = exit_code
         self.stderr = stderr
+        self._display_stderr = display_stderr
         super().__init__(message)
 
     @property
     def display_stderr(self) -> str:
         """The stderr a terminal shows for this failure.
 
-        ``""`` when the command failed silently or its stderr was
-        redirected; otherwise ``message``, the diagnostic as it reached
-        the screen.
+        The ``display_stderr`` it was raised with, when one was given:
+        for a failure whose screen text is not its description, such as
+        ``xargs`` showing its earlier runs' warnings and then a command
+        that failed silently. Otherwise ``""`` when the command failed
+        silently or its stderr was redirected, and ``message`` when it
+        didn't, the diagnostic as it reached the screen.
         """
+        if self._display_stderr is not None:
+            return self._display_stderr
         return "" if self.stderr == "" else self.message
 
 

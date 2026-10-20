@@ -406,15 +406,46 @@ class TestDisplayStderr:
         assert e.exit_code == 2
         assert e.display_stderr == self.MISSING + "\n"
 
-    def test_xargs_shows_earlier_warnings_and_no_invented_text(self, fs):
+    @staticmethod
+    def _warn_then(failure: CommandResult):
+        """A command that warns on its first run and fails on the next."""
         calls = []
 
         def warn(ctx: CommandContext) -> CommandResult | None:
             calls.append(ctx.args)
             if len(calls) == 1:
                 return CommandResult(stderr="warn: careful\n")
-            return CommandResult(exit_code=1, stderr="")
+            return failure
 
-        e = self._fail("echo a b | xargs -n 1 warn", fs, commands={"warn": warn})
-        assert e.exit_code == 1
+        return {"warn": warn}
+
+    def test_xargs_warning_then_a_silent_failure(self, fs):
+        cmds = self._warn_then(CommandResult(exit_code=7, stderr=""))
+        e = self._fail("echo a b | xargs -n 1 warn", fs, commands=cmds)
+        assert e.exit_code == 7
+        # the message still names the failure; the screen shows only
+        # what reached stderr, the warning
+        assert e.message == "warn: careful\nwarn: exited with code 7\n"
         assert e.display_stderr == "warn: careful\n"
+        assert e.stderr == "warn: careful\n"
+
+    def test_xargs_warning_then_a_failure_with_a_diagnostic(self, fs):
+        cmds = self._warn_then(CommandResult(exit_code=7, stderr="warn: broke"))
+        e = self._fail("echo a b | xargs -n 1 warn", fs, commands=cmds)
+        assert e.exit_code == 7
+        assert e.message == "warn: careful\nwarn: broke\n"
+        assert e.display_stderr == "warn: careful\nwarn: broke\n"
+
+    def test_xargs_warning_then_a_redirected_failure(self, fs):
+        cmds = self._warn_then(CommandResult(exit_code=7, stderr=""))
+        e = self._fail("echo a b | xargs -n 1 warn 2>/dev/null", fs, commands=cmds)
+        assert e.exit_code == 7
+        assert e.display_stderr == ""
+
+    def test_an_explicit_display_stderr_wins(self):
+        e = TerminalError(
+            "x: exited with code 3", exit_code=3, stderr="w\n", display_stderr="w\n"
+        )
+        assert e.display_stderr == "w\n"
+        assert TerminalError("boom").display_stderr == "boom"
+        assert TerminalError("x: exited with code 1", stderr="").display_stderr == ""

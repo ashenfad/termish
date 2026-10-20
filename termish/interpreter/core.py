@@ -289,6 +289,7 @@ def _execute_script_inner(script: Script, fs: FileSystem, env: dict[str, str]) -
             partial_output=_transcript(final_output),
             exit_code=last_error.exit_code,
             stderr=last_error.stderr,
+            display_stderr=last_error.display_stderr,
         )
 
     return _transcript(final_output)
