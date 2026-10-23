@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.5] - 2026-10-22
 
 ### Added
 - **`help sed` lists what sed reads and what it doesn't.** Options, addresses, commands, `s` flags and replacement escapes, the one-line-at-a-time rule, and the GNU constructs left out.
@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **sed's replacement escapes.** `\0` is the whole match and any other escaped character stands for itself (`\$` is `$`), where `\q` failed with a Python regex error.
 - **sed allows spaces between an address and its command** (`1 d`, `/x/ p`).
 - **`help awk` shows awk's usage**, as termish-ts does.
+- **`sed -in` no longer empties the file.** GNU and BSD read `-in` as `-i` with the backup suffix `n`; it was taken as `-i -n`, so the in-place write left the file empty. Any `-iSUFFIX`, letters included, is now refused, and `--` ends the scan, so a file named `-i.bak` can follow it.
 
 ## [0.2.4] - 2026-10-20
 
