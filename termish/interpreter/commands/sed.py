@@ -80,6 +80,20 @@ def _unsupported(what: str) -> TerminalError:
     return TerminalError(f"sed: {what}{_SEE_HELP}")
 
 
+#: A short-option cluster with -i and something after it: the flags
+#: before the i, and what GNU reads as the backup suffix.
+_SUFFIXED = re.compile(r"-([nEr]*)i(.+)", re.DOTALL)
+
+
+def _suffix_refusal(arg: str, flags: str, suffix: str) -> str:
+    if not suffix[0].isalpha():
+        return "-i takes no backup suffix"
+    why = f"-i takes no backup suffix, and {arg} is -i with the suffix '{suffix}'"
+    if set(suffix) <= set("nEr"):
+        return f"{why}; for both, put -i last: -{flags}{suffix}i"
+    return why
+
+
 def _check_one_line(pattern: str) -> None:
     """Refuse a pattern holding a newline (literal, or ``\\n`` outside a
     bracket expression): lines are edited one at a time, so it would
@@ -573,11 +587,13 @@ def sed(ctx: CommandContext) -> CommandResult | None:
     for arg in args:
         if arg == "--":
             break  # the rest are operands, whatever they look like
-        # GNU's -iSUFFIX (and --in-place=SUFFIX) keeps a backup; here -i doesn't.
-        if (arg.startswith("-i") and len(arg) > 2 and not arg[2].isalpha()) or (
-            arg.startswith("--in-place=")
-        ):
+        if arg.startswith("--in-place="):
             raise _unsupported("-i takes no backup suffix")
+        # GNU's -iSUFFIX keeps a backup, and everything after the i is the
+        # suffix, letters too: -in is not -i -n. Here -i keeps none.
+        suffixed = _SUFFIXED.fullmatch(arg)
+        if suffixed:
+            raise _unsupported(_suffix_refusal(arg, *suffixed.groups()))
     parser = CommandArgParser(prog="sed", add_help=False)
     parser.add_argument("-n", "--quiet", "--silent", action="store_true")
     parser.add_argument("-i", "--in-place", action="store_true")
