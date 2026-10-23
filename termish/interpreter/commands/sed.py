@@ -571,6 +571,8 @@ def sed(ctx: CommandContext) -> CommandResult | None:
     """Stream editor for filtering and transforming text."""
     args, stdin, stdout, fs = ctx.args, ctx.stdin, ctx.stdout, ctx.fs
     for arg in args:
+        if arg == "--":
+            break  # the rest are operands, whatever they look like
         # GNU's -iSUFFIX (and --in-place=SUFFIX) keeps a backup; here -i doesn't.
         if (arg.startswith("-i") and len(arg) > 2 and not arg[2].isalpha()) or (
             arg.startswith("--in-place=")
