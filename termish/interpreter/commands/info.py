@@ -107,6 +107,8 @@ def help_cmd(ctx: CommandContext) -> CommandResult | None:
         ctx.stdout.write(f"{name} - {entry.summary}\n")
         if entry.usage:
             ctx.stdout.write(f"usage: {entry.usage}\n")
+        if entry.notes:
+            ctx.stdout.write(f"{entry.notes}\n")
         return None
     names = sorted(commands)
     width = max(len(n) for n in names)

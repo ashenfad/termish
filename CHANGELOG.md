@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **`help sed` lists what sed reads and what it doesn't.** Options, addresses, commands, `s` flags and replacement escapes, the one-line-at-a-time rule, and the GNU constructs left out.
+
+### Changed
+- **sed names what it doesn't support.** `{...}` blocks, `!`, `first~step`, `addr,+N`, `0,/RE/`, hold space, `n N P D`, branches, `s` flags beyond `g i p`, and `-i` with a backup suffix (`-i.bak`, BSD's `-i ''`) each fail with a message naming the construct and pointing at `help sed`, rather than `unknown command`.
+- **A sed pattern that would span lines is an error.** A newline in an `s` or address pattern (`\n` outside `[...]`, or a literal one) never matches when lines are edited one at a time, so it fails rather than silently changing nothing.
+
+### Fixed
+- **sed ends a line only at `\n`.** A form feed, a lone `\r` and the other characters `str.splitlines` breaks at are ordinary characters, as in GNU sed, rather than line ends that `-i` wrote back as newlines.
+- **sed's replacement escapes.** `\0` is the whole match and any other escaped character stands for itself (`\$` is `$`), where `\q` failed with a Python regex error.
+- **sed allows spaces between an address and its command** (`1 d`, `/x/ p`).
+- **`help awk` shows awk's usage**, as termish-ts does.
+
 ## [0.2.4] - 2026-10-20
 
 ### Added
