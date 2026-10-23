@@ -1,6 +1,8 @@
 """What ``help`` says of each builtin: a one-line summary for the list,
-and its usage for ``help NAME``. The same text as termish-ts's
-``help-text.ts``, entry for entry (``jq`` is termish-py's alone).
+its usage for ``help NAME``, and for a command that is a subset of the
+GNU one, notes on what it reads and what it doesn't. The same text as
+termish-ts's ``help-text.ts``, entry for entry (``jq`` is termish-py's
+alone).
 """
 
 from typing import NamedTuple
@@ -9,12 +11,36 @@ from typing import NamedTuple
 class HelpEntry(NamedTuple):
     summary: str
     usage: str
+    notes: str = ""
+
+
+_SED_NOTES = "\n".join(
+    [
+        "Supported (a subset of GNU sed):",
+        "  -n          print only what p (or s///p) prints",
+        "  -i          edit FILEs in place (no backup suffix)",
+        r"  -E, -r      extended regex; without it, basic (\( \) \{ \} \| \+ \?)",
+        "  addresses   N, $, /RE/, or a range A,B of those",
+        "  commands    s/RE/REPL/[gip] (any delimiter), y/SRC/DST/, p, d, q,",
+        "              a TEXT, i TEXT, c TEXT; separate them with ; or newlines",
+        r"  REPL        & or \0 (the match), \1-\9 (groups), \n, \t",
+        "Lines are edited one at a time: a pattern never matches across a newline.",
+        "For more than this, use awk, or edit the file another way.",
+        "Not supported: {...} blocks, ! (negation), first~step, A,+N, 0,/RE/,",
+        "  hold space (h H g G x), n N P D, branches (b t T :label), = l r w,",
+        "  s flags other than g i p (N, w, I, m, e), -i SUFFIX, -s, -z",
+    ]
+)
 
 
 HELP: dict[str, HelpEntry] = {
     "[": HelpEntry(
         "evaluate a condition (same as test)",
         "[ EXPRESSION ]",
+    ),
+    "awk": HelpEntry(
+        "scan and process text by patterns and fields",
+        "awk [-F FS] [-v VAR=VALUE]... ('PROGRAM' | -f PROGFILE) [FILE...]",
     ),
     "basename": HelpEntry(
         "strip the directory from a path",
@@ -147,6 +173,7 @@ HELP: dict[str, HelpEntry] = {
     "sed": HelpEntry(
         "edit text as a stream",
         "sed [-n] [-i] [-E] (-e SCRIPT)... | SCRIPT [FILE...]",
+        _SED_NOTES,
     ),
     "seq": HelpEntry(
         "print a sequence of numbers",

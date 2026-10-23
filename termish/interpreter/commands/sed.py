@@ -1,5 +1,10 @@
 """
 Stream editor for filtering and transforming text.
+
+A subset of GNU sed that edits one line at a time; ``help sed`` lists
+what it reads. Constructs outside the subset that an agent is likely to
+write (``{...}`` blocks, ``!``, hold space, ``N``, branches, ...) fail
+with a message naming the construct, rather than a bare parse error.
 """
 
 import re
@@ -51,6 +56,69 @@ class _SedCommand:
 # Parsing helpers
 # ---------------------------------------------------------------------------
 
+#: Ends every message about a construct outside the subset.
+_SEE_HELP = " (see: help sed)"
+
+#: Commands outside the subset, grouped under the name each group fails with.
+_UNSUPPORTED_COMMANDS = {
+    "{": "'{...}' blocks are not supported",
+    "}": "'{...}' blocks are not supported",
+    "!": "'!' (negated addresses) is not supported",
+    **dict.fromkeys("hHgGx", "hold space commands (h H g G x) are not supported"),
+    **dict.fromkeys(
+        "nNPD",
+        "multi-line commands (n N P D) are not supported: lines are edited one at a time",
+    ),
+    **dict.fromkeys("btT:", "branches and labels (b t T :label) are not supported"),
+}
+
+#: Flags of GNU's ``s`` outside the subset (a digit is the Nth-match flag).
+_UNSUPPORTED_S_FLAGS = "0123456789wImMe"
+
+
+def _unsupported(what: str) -> TerminalError:
+    return TerminalError(f"sed: {what}{_SEE_HELP}")
+
+
+def _check_one_line(pattern: str) -> None:
+    """Refuse a pattern holding a newline (literal, or ``\\n`` outside a
+    bracket expression): lines are edited one at a time, so it would
+    never match."""
+    if _has_newline(pattern):
+        raise _unsupported(
+            "a pattern can't match across lines: lines are edited one at a time"
+        )
+
+
+def _has_newline(pattern: str) -> bool:
+    i = 0
+    in_bracket = False
+    while i < len(pattern):
+        ch = pattern[i]
+        if ch == "\n":
+            return True
+        if in_bracket:
+            if ch == "]":
+                in_bracket = False
+            i += 1
+            continue
+        if ch == "\\" and i + 1 < len(pattern):
+            if pattern[i + 1] == "n":
+                return True
+            i += 2
+            continue
+        if ch == "[":
+            in_bracket = True
+            # A ']' right after '[' or '[^' is a member, not the end.
+            i += 1
+            if i < len(pattern) and pattern[i] == "^":
+                i += 1
+            if i < len(pattern) and pattern[i] == "]":
+                i += 1
+            continue
+        i += 1
+    return False
+
 
 def _scan_delimited(text: str, pos: int, delim: str) -> tuple[str, int]:
     """Scan from *pos* until an unescaped *delim*. Returns (content, new_pos)."""
@@ -88,10 +156,13 @@ def _translate_replacement(repl: str) -> str:
                 result.append("\t")
             elif next_ch == "\\":
                 result.append("\\\\")
+            elif next_ch == "0":
+                result.append(r"\g<0>")
             elif next_ch.isdigit():
                 result.append("\\" + next_ch)
             else:
-                result.append("\\" + next_ch)
+                # Any other escaped character stands for itself.
+                result.append(next_ch)
             i += 2
         elif repl[i] == "&":
             result.append(r"\g<0>")
@@ -118,7 +189,12 @@ def _parse_address(
         end = pos
         while end < len(text) and text[end].isdigit():
             end += 1
-        return _Address(line=int(text[pos:end])), end
+        if end < len(text) and text[end] == "~":
+            raise _unsupported("'first~step' addresses are not supported")
+        line = int(text[pos:end])
+        if line == 0:
+            raise _unsupported("line address 0 (as in 0,/RE/) is not supported")
+        return _Address(line=line), end
 
     # Last line
     if ch == "$":
@@ -127,6 +203,7 @@ def _parse_address(
     # Regex address /pattern/
     if ch == "/":
         content, new_pos = _scan_delimited(text, pos + 1, "/")
+        _check_one_line(content)
         try:
             compiled = re.compile(content if extended else bre_to_python(content))
         except re.error as e:
@@ -162,9 +239,12 @@ def _parse_substitution(
     while pos < len(text) and text[pos] in "gip":
         flags_str += text[pos]
         pos += 1
+    if pos < len(text) and text[pos] in _UNSUPPORTED_S_FLAGS:
+        raise _unsupported(f"the 's' flag '{text[pos]}' is not supported")
 
     if not raw_pattern:
         raise TerminalError("sed: empty regex in substitution")
+    _check_one_line(raw_pattern)
 
     re_flags = 0
     if "i" in flags_str:
@@ -197,11 +277,15 @@ def _parse_single_command(text: str, extended: bool = False) -> _SedCommand:
         pos += 1
         addr2, pos = _parse_address(text, pos, extended)
         if addr2 is None:
-            raise TerminalError("sed: invalid address range")
+            if pos < len(text) and text[pos] in "+~":
+                raise _unsupported(f"'addr,{text[pos]}N' addresses are not supported")
+            raise TerminalError(f"sed: invalid address range{_SEE_HELP}")
 
     addr_range = _AddressRange(addr1=addr1, addr2=addr2)
 
-    # Parse command character
+    # Parse command character (spaces may come between it and the address)
+    while pos < len(text) and text[pos] == " ":
+        pos += 1
     if pos >= len(text):
         raise TerminalError("sed: missing command")
 
@@ -248,12 +332,14 @@ def _parse_single_command(text: str, extended: bool = False) -> _SedCommand:
         rest = rest.replace("\\n", "\n")
         cmd = _SedCommand(address=addr_range, command=cmd_char, text=rest)
         pos = len(text)
+    elif cmd_char in _UNSUPPORTED_COMMANDS:
+        raise _unsupported(_UNSUPPORTED_COMMANDS[cmd_char])
     else:
-        raise TerminalError(f"sed: unknown command: '{cmd_char}'")
+        raise TerminalError(f"sed: unknown command: '{cmd_char}'{_SEE_HELP}")
 
     trailing = text[pos:].strip()
     if trailing:
-        raise TerminalError(f"sed: trailing characters: '{trailing}'")
+        raise TerminalError(f"sed: trailing characters: '{trailing}'{_SEE_HELP}")
 
     return cmd
 
@@ -394,14 +480,12 @@ def _process_content(content: str, commands: list[_SedCommand], suppress: bool) 
     if not content:
         return ""
 
-    lines = content.splitlines(keepends=True)
+    # Only "\n" ends a line ("\r", "\f" and the like are ordinary
+    # characters), and every line is processed with its "\n".
+    lines = [line + "\n" for line in content.removesuffix("\n").split("\n")]
 
     # Track whether original content ended with a newline
     had_trailing_newline = content.endswith("\n")
-
-    # Normalize: ensure every line ends with \n for consistent processing
-    if lines and not lines[-1].endswith("\n"):
-        lines[-1] += "\n"
 
     total_lines = len(lines)
     range_active: list[bool] = [False] * len(commands)
@@ -486,6 +570,12 @@ def _process_content(content: str, commands: list[_SedCommand], suppress: bool) 
 def sed(ctx: CommandContext) -> CommandResult | None:
     """Stream editor for filtering and transforming text."""
     args, stdin, stdout, fs = ctx.args, ctx.stdin, ctx.stdout, ctx.fs
+    for arg in args:
+        # GNU's -iSUFFIX (and --in-place=SUFFIX) keeps a backup; here -i doesn't.
+        if (arg.startswith("-i") and len(arg) > 2 and not arg[2].isalpha()) or (
+            arg.startswith("--in-place=")
+        ):
+            raise _unsupported("-i takes no backup suffix")
     parser = CommandArgParser(prog="sed", add_help=False)
     parser.add_argument("-n", "--quiet", "--silent", action="store_true")
     parser.add_argument("-i", "--in-place", action="store_true")
@@ -497,7 +587,11 @@ def sed(ctx: CommandContext) -> CommandResult | None:
 
     parsed, unknown = parser.parse_known_args(args)
     if unknown:
-        raise TerminalError(f"sed: unknown option: {unknown[0]}")
+        raise TerminalError(f"sed: unknown option: {unknown[0]}{_SEE_HELP}")
+
+    if parsed.in_place and parsed.args_remainder[:1] == [""]:
+        # BSD's `sed -i '' SCRIPT FILE`, where the '' is a backup suffix.
+        raise _unsupported("-i takes no backup suffix, so drop the ''")
 
     # Collect expressions and file list
     expressions: list[str] = []
